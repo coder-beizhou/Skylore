@@ -1,0 +1,323 @@
+/* ==========================================================================
+   苍穹 · 设计令牌
+   所有颜色、间距、圆角、动效曲线集中在此。皮肤与主题通过覆盖这些变量实现，
+   组件样式只引用变量，从而做到「换主题不用改组件」。
+   ========================================================================== */
+
+:root {
+  /* —— 字体栈 —— */
+  --font-ui: "Microsoft YaHei", "PingFang SC", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+  --font-serif-cn: "Songti SC", "SimSun", "Source Han Serif SC", serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, "SF Mono", monospace;
+  --font-reading: var(--font-ui);
+
+  /* —— 字号阶 —— */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 26px;
+  --fs-3xl: 34px;
+
+  /* —— 字重（仅用两档，避免视觉噪音）—— */
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-bold: 600;
+
+  /* —— 间距 —— */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* —— 圆角 —— */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-full: 999px;
+
+  /* —— 层级 —— */
+  --z-base: 1;
+  --z-sticky: 20;
+  --z-titlebar: 60;
+  --z-panel: 80;
+  --z-modal: 100;
+  --z-toast: 140;
+  --z-boss: 200;
+
+  /* —— 动效曲线：统一手感的关键 —— */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 380ms;
+
+  /* —— 标题栏 —— */
+  --titlebar-h: 44px;
+
+  /* —— 语义色（主题会覆盖）—— */
+  --c-accent: #5a6cf3;
+  --c-accent-soft: rgba(90, 108, 243, 0.12);
+  --c-accent-text: #ffffff;
+  --c-danger: #e05252;
+  --c-success: #35a06b;
+  --c-warning: #d99a2b;
+
+  /* —— 表面（主题会覆盖）—— */
+  --bg-app: #f5f4f1;
+  --bg-surface: #ffffff;
+  --bg-surface-2: #fafaf8;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #eeedea;
+  --bg-hover: rgba(0, 0, 0, 0.045);
+  --bg-active: rgba(0, 0, 0, 0.075);
+  --bg-overlay: rgba(24, 24, 28, 0.42);
+
+  --tx-primary: #23211f;
+  --tx-secondary: #6b6660;
+  --tx-tertiary: #9c968e;
+  --tx-inverse: #ffffff;
+
+  --bd-subtle: rgba(0, 0, 0, 0.07);
+  --bd-base: rgba(0, 0, 0, 0.12);
+  --bd-strong: rgba(0, 0, 0, 0.2);
+
+  /* —— 阴影 —— */
+  --sh-sm: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 1px rgba(0, 0, 0, 0.04);
+  --sh-md: 0 4px 14px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --sh-lg: 0 12px 36px rgba(0, 0, 0, 0.12), 0 3px 8px rgba(0, 0, 0, 0.06);
+  --sh-xl: 0 24px 64px rgba(0, 0, 0, 0.18), 0 6px 16px rgba(0, 0, 0, 0.08);
+
+  /* —— 阅读区 —— */
+  --reader-bg: #ffffff;
+  --reader-ink: #23211f;
+  --reader-ink-soft: #6b6660;
+  --reader-letter-spacing: 0.02em;
+  --reader-line-height: 1.8;
+  --reader-font-size: 19px;
+  --reader-font-weight: 400;
+  --reader-para-spacing: 0.9em;
+  --reader-para-indent: 2em;
+  --reader-text-align: justify;
+  --reader-mt: 64px;
+  --reader-mb: 64px;
+  --reader-ml: 88px;
+  --reader-mr: 88px;
+  --reader-max-width: none;
+  --reader-brightness: 1;
+  --reader-page-gap: 48px;
+
+  /* —— 骨架 —— */
+  --skeleton: rgba(0, 0, 0, 0.06);
+}
+
+/* ==========================================================================
+   主题：日间
+   ========================================================================== */
+[data-theme="day"] {
+  --bg-app: #f2f1ee;
+  --bg-surface: #ffffff;
+  --bg-surface-2: #faf9f7;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #eae8e4;
+  --bg-hover: rgba(0, 0, 0, 0.045);
+  --bg-active: rgba(0, 0, 0, 0.08);
+  --bg-overlay: rgba(40, 36, 32, 0.34);
+
+  --tx-primary: #23211f;
+  --tx-secondary: #6d6862;
+  --tx-tertiary: #9e988f;
+
+  --bd-subtle: rgba(0, 0, 0, 0.07);
+  --bd-base: rgba(0, 0, 0, 0.12);
+  --bd-strong: rgba(0, 0, 0, 0.2);
+
+  --reader-bg: #ffffff;
+  --reader-ink: #23211f;
+  --reader-ink-soft: #6d6862;
+  --skeleton: rgba(0, 0, 0, 0.06);
+}
+
+/* ==========================================================================
+   主题：夜间
+   用深灰而非纯黑 —— 纯黑在暗环境下对比过强，长时间阅读眼睛更累
+   ========================================================================== */
+[data-theme="night"] {
+  --bg-app: #101215;
+  --bg-surface: #191c21;
+  --bg-surface-2: #1e2228;
+  --bg-elevated: #23272e;
+  --bg-sunken: #0c0e11;
+  --bg-hover: rgba(255, 255, 255, 0.055);
+  --bg-active: rgba(255, 255, 255, 0.095);
+  --bg-overlay: rgba(0, 0, 0, 0.62);
+
+  --tx-primary: #d6d4d0;
+  --tx-secondary: #96938d;
+  --tx-tertiary: #6b6862;
+  --tx-inverse: #16181c;
+
+  --bd-subtle: rgba(255, 255, 255, 0.07);
+  --bd-base: rgba(255, 255, 255, 0.12);
+  --bd-strong: rgba(255, 255, 255, 0.2);
+
+  --sh-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sh-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --sh-lg: 0 12px 36px rgba(0, 0, 0, 0.55);
+  --sh-xl: 0 24px 64px rgba(0, 0, 0, 0.65);
+
+  --reader-bg: #191c21;
+  --reader-ink: #cfcdc9;
+  --reader-ink-soft: #8d8a84;
+  --skeleton: rgba(255, 255, 255, 0.06);
+}
+
+/* ==========================================================================
+   主题：护眼（豆沙绿）
+   ========================================================================== */
+[data-theme="eyecare"] {
+  --bg-app: #d3e6d6;
+  --bg-surface: #e6f2e7;
+  --bg-surface-2: #dcecde;
+  --bg-elevated: #edf6ee;
+  --bg-sunken: #c8dfcb;
+  --bg-hover: rgba(30, 70, 40, 0.07);
+  --bg-active: rgba(30, 70, 40, 0.12);
+  --bg-overlay: rgba(20, 44, 28, 0.34);
+
+  --tx-primary: #1f3025;
+  --tx-secondary: #4e6553;
+  --tx-tertiary: #7b9182;
+
+  --bd-subtle: rgba(30, 70, 40, 0.1);
+  --bd-base: rgba(30, 70, 40, 0.17);
+  --bd-strong: rgba(30, 70, 40, 0.26);
+
+  --c-accent: #3f7d55;
+  --c-accent-soft: rgba(63, 125, 85, 0.16);
+
+  --reader-bg: #cce8cf;
+  --reader-ink: #1f3025;
+  --reader-ink-soft: #4e6553;
+  --skeleton: rgba(30, 70, 40, 0.07);
+}
+
+/* ==========================================================================
+   主题：羊皮纸 / 护眼棕
+   ========================================================================== */
+[data-theme="sepia"] {
+  --bg-app: #e9dfc9;
+  --bg-surface: #f6edda;
+  --bg-surface-2: #efe5d0;
+  --bg-elevated: #fbf4e5;
+  --bg-sunken: #ded1b5;
+  --bg-hover: rgba(80, 60, 30, 0.07);
+  --bg-active: rgba(80, 60, 30, 0.12);
+  --bg-overlay: rgba(60, 44, 22, 0.34);
+
+  --tx-primary: #2e2619;
+  --tx-secondary: #6b5c42;
+  --tx-tertiary: #9a8a6c;
+
+  --bd-subtle: rgba(80, 60, 30, 0.1);
+  --bd-base: rgba(80, 60, 30, 0.18);
+  --bd-strong: rgba(80, 60, 30, 0.28);
+
+  --c-accent: #9a6a35;
+  --c-accent-soft: rgba(154, 106, 53, 0.16);
+
+  --reader-bg: #f2e7d0;
+  --reader-ink: #2e2619;
+  --reader-ink-soft: #6b5c42;
+  --skeleton: rgba(80, 60, 30, 0.07);
+}
+
+/* ==========================================================================
+   主题：暗夜青（夜间变体，低饱和青灰，比纯夜更柔和）
+   ========================================================================== */
+[data-theme="mint"] {
+  --bg-app: #0e1a19;
+  --bg-surface: #14211f;
+  --bg-surface-2: #192927;
+  --bg-elevated: #1e302d;
+  --bg-sunken: #0a1514;
+  --bg-hover: rgba(255, 255, 255, 0.055);
+  --bg-active: rgba(255, 255, 255, 0.095);
+  --bg-overlay: rgba(0, 0, 0, 0.62);
+
+  --tx-primary: #ccd8d5;
+  --tx-secondary: #8fa09c;
+  --tx-tertiary: #667874;
+  --tx-inverse: #0e1a19;
+
+  --bd-subtle: rgba(255, 255, 255, 0.075);
+  --bd-base: rgba(255, 255, 255, 0.13);
+  --bd-strong: rgba(255, 255, 255, 0.21);
+
+  --c-accent: #4aa88f;
+  --c-accent-soft: rgba(74, 168, 143, 0.16);
+
+  --sh-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sh-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --sh-lg: 0 12px 36px rgba(0, 0, 0, 0.55);
+  --sh-xl: 0 24px 64px rgba(0, 0, 0, 0.65);
+
+  --reader-bg: #16241f;
+  --reader-ink: #c6d3ce;
+  --reader-ink-soft: #87988f;
+  --skeleton: rgba(255, 255, 255, 0.06);
+}
+
+/* ==========================================================================
+   主题：米黄纸（暖调低刺激，适合长时间阅读）
+   ========================================================================== */
+[data-theme="paper"] {
+  --bg-app: #efe8dc;
+  --bg-surface: #faf5ec;
+  --bg-surface-2: #f4ede1;
+  --bg-elevated: #fffaf2;
+  --bg-sunken: #e4dccc;
+  --bg-hover: rgba(90, 74, 50, 0.06);
+  --bg-active: rgba(90, 74, 50, 0.11);
+  --bg-overlay: rgba(60, 48, 30, 0.32);
+
+  --tx-primary: #2b2620;
+  --tx-secondary: #6d6252;
+  --tx-tertiary: #9d9382;
+
+  --bd-subtle: rgba(90, 74, 50, 0.09);
+  --bd-base: rgba(90, 74, 50, 0.16);
+  --bd-strong: rgba(90, 74, 50, 0.26);
+
+  --c-accent: #a8763e;
+  --c-accent-soft: rgba(168, 118, 62, 0.15);
+
+  --reader-bg: #f7f0e4;
+  --reader-ink: #2b2620;
+  --reader-ink-soft: #6d6252;
+  --skeleton: rgba(90, 74, 50, 0.06);
+}
+
+/* 高对比辅助（无障碍） */
+[data-contrast="high"] {
+  --tx-primary: #000000;
+  --tx-secondary: #333333;
+  --bd-base: rgba(0, 0, 0, 0.4);
+  --bd-strong: rgba(0, 0, 0, 0.6);
+}
+[data-theme="night"][data-contrast="high"],
+[data-theme="mint"][data-contrast="high"] {
+  --tx-primary: #ffffff;
+  --tx-secondary: #dddddd;
+  --bd-base: rgba(255, 255, 255, 0.4);
+}

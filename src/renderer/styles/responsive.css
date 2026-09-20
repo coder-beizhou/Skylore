@@ -1,0 +1,115 @@
+/* ==========================================================================
+   窄窗口适配
+   ==========================================================================
+
+   背景：窗口最小宽度曾被卡在 900px，用户无法把窗口收窄 ——
+   而阅读器恰恰是最需要"贴边并排看"的软件（左边文档、右边小说）。
+   现已放开到 520px，因此各视图必须能在窄窗下正常工作。
+
+   阈值取 1080 / 860 / 680 三档，逐级收窄侧栏、收紧间距、减少列数。
+   ========================================================================== */
+
+/* —— 1080px 以下：侧栏收窄、页边距收紧 —— */
+@media (max-width: 1080px) {
+  .sidebar { width: 172px; }
+  .content__head { padding: var(--sp-4) var(--sp-5) var(--sp-2); }
+  .content__body { padding: var(--sp-3) var(--sp-5) var(--sp-8); }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
+  .settings-body { padding: var(--sp-5) var(--sp-5) var(--sp-8); }
+  .settings-nav { width: 160px; }
+}
+
+/* —— 860px 以下：侧栏压成图标条，工具栏允许换行 —— */
+@media (max-width: 860px) {
+  .sidebar {
+    width: 56px;
+    padding: var(--sp-3) var(--sp-2);
+  }
+  /* 只留图标，隐藏文字与分组标题 */
+  .sidebar .sidebar__label,
+  .sidebar .sidebar__section,
+  .sidebar .sidebar__count,
+  .sidebar .sidebar__text { display: none; }
+  .sidebar .sidebar__item { justify-content: center; padding: 0; gap: 0; }
+
+  .content__head {
+    padding: var(--sp-3) var(--sp-4) var(--sp-2);
+    gap: var(--sp-2);
+  }
+  .content__title { font-size: var(--fs-lg); }
+  /* 工具条换行，避免把标题挤没 */
+  .content__tools {
+    margin-left: 0;
+    width: 100%;
+    flex-wrap: wrap;
+    row-gap: var(--sp-2);
+  }
+  .content__body { padding: var(--sp-2) var(--sp-4) var(--sp-6); }
+
+  .grid { grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: var(--sp-4) var(--sp-3); }
+
+  /* 设置页导航改为横向滚动条 */
+  .settings-page { flex-direction: column; }
+  .settings-nav {
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-bottom: 1px solid var(--bd-subtle);
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-1);
+  }
+  .settings-nav__item { flex: 0 0 auto; white-space: nowrap; }
+  .settings-body { padding: var(--sp-4) var(--sp-4) var(--sp-6); }
+
+  /* 抽屉在窄窗下占满，否则会和正文挤在一起 */
+  .drawer--left { width: min(84vw, 320px); }
+  .drawer { width: min(88vw, 340px); }
+  .reader.is-left-drawer .reader-paper { left: 0; }
+}
+
+/* —— 680px 以下：书架换成两列、极简按钮条，但分组筛选必须保留 —— */
+@media (max-width: 680px) {
+  /* ⚠ 不要在这里把侧栏宽度设为 0。
+     早期版本为了省空间直接隐藏侧栏，结果"分组 / 在读 / 收藏"这些筛选
+     在窄窗下彻底消失 —— 那是功能损失，不是适配。
+     改为保留一条只含图标的窄栏（56px），筛选始终可用。 */
+  .sidebar {
+    width: 48px;
+    padding: var(--sp-2) 4px;
+  }
+  .sidebar .sidebar__label,
+  .sidebar .sidebar__section,
+  .sidebar .sidebar__count { display: none; }
+  .sidebar .sidebar__item { justify-content: center; padding: 0; gap: 0; height: 34px; }
+
+  .grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: var(--sp-3); }
+  .content__body { padding: var(--sp-2) var(--sp-3) var(--sp-5); }
+  .content__head { padding: var(--sp-3) var(--sp-3) var(--sp-2); }
+
+  /* 标题栏品牌文字在极窄时省略 */
+  .titlebar__brand .titlebar__title { display: none; }
+  .titlebar__sub { max-width: 120px; }
+  .win-btn { width: 30px; }
+
+  /* 阅读顶栏按钮压缩间距 */
+  .reader-topbar { padding: 0 var(--sp-2); gap: var(--sp-1); height: 46px; }
+  .reader-topbar__chapter { display: none; }
+  .rbtn { width: 28px; height: 28px; }
+  .reader-bottombar { padding: 0 var(--sp-3); gap: var(--sp-2); }
+  .reader-fabs { right: var(--sp-3); bottom: 56px; }
+
+  /* 章末导航按钮竖排，避免横向溢出 */
+  .chapter-nav { flex-wrap: wrap; gap: var(--sp-2); }
+  .chapter-nav__btn { padding: 0 var(--sp-4); }
+
+  .empty__title { font-size: var(--fs-lg); }
+}
+
+/* —— 窗口很矮时：压缩纵向留白 —— */
+@media (max-height: 620px) {
+  .content__head { padding-top: var(--sp-3); padding-bottom: var(--sp-2); }
+  .content__body { padding-bottom: var(--sp-6); }
+  .reader-fabs { bottom: 54px; }
+}

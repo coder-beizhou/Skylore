@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="day" data-skin="minimal" data-contrast="normal">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob: firmament-font:; font-src 'self' data: firmament-font:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<title>苍穹 · Firmament Reader</title>
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/fonts.css">
+<link rel="stylesheet" href="styles/base.css">
+<link rel="stylesheet" href="styles/skins.css">
+<link rel="stylesheet" href="styles/bookshelf.css">
+<link rel="stylesheet" href="styles/reader.css">
+<link rel="stylesheet" href="styles/panels.css">
+<link rel="stylesheet" href="styles/responsive.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============ 标题栏 ============ -->
+  <header class="titlebar" id="titlebar">
+    <div class="titlebar__brand">
+      <div class="titlebar__logo">苍</div>
+      <span class="titlebar__title">苍穹</span>
+      <span class="titlebar__sub" id="titlebarSub"></span>
+    </div>
+
+    <div class="titlebar__center" id="titlebarCenter"></div>
+
+    <div class="titlebar__right">
+      <div id="titlebarActions" class="flex items-center gap-1"></div>
+      <div class="win-controls">
+        <button class="win-btn" id="btnMin" title="最小化" aria-label="最小化"></button>
+        <button class="win-btn" id="btnMax" title="最大化" aria-label="最大化"></button>
+        <button class="win-btn win-btn--close" id="btnClose" title="关闭" aria-label="关闭"></button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ 视图：书架 ============ -->
+  <section class="view" id="viewLibrary">
+    <div class="library">
+
+      <aside class="sidebar" id="sidebar">
+        <div id="sidebarItems"></div>
+        <div class="sidebar__divider"></div>
+        <button class="sidebar__item" id="navSettings"></button>
+        <button class="sidebar__item" id="navImportFont"></button>
+      </aside>
+
+      <div class="content">
+        <div class="content__head">
+          <h1 class="content__title" id="shelfTitle">全部书籍</h1>
+          <span class="content__meta" id="shelfMeta"></span>
+          <div class="content__tools">
+            <div class="search-box">
+              <span id="shelfSearchIcon"></span>
+              <input class="input" id="shelfSearch" type="search" placeholder="搜索书名 / 作者" autocomplete="off">
+            </div>
+            <div class="segment" id="shelfSort">
+              <button class="segment__item" data-sort="recent">最近</button>
+              <button class="segment__item" data-sort="added">导入</button>
+              <button class="segment__item" data-sort="title">书名</button>
+              <button class="segment__item" data-sort="progress">进度</button>
+            </div>
+            <button class="btn btn--icon" id="btnViewMode" title="网格 / 列表"></button>
+            <button class="btn btn--soft" id="btnImport">
+              <span id="importIcon"></span><span>导入</span>
+            </button>
+            <button class="btn btn--icon" id="btnShelfMore" title="更多"></button>
+          </div>
+        </div>
+
+        <div id="resumeHost"></div>
+        <div id="statHost"></div>
+
+        <div class="content__body thin-scroll" id="shelfBody">
+          <div class="grid" id="shelfGrid"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 视图：阅读 ============ -->
+  <section class="view view--hidden" id="viewReader">
+    <div class="reader" id="reader">
+      <div class="reader-bg reader-bg--tex" id="readerBgTex"></div>
+      <div class="reader-bg reader-bg--cover" id="readerBgCover"></div>
+      <div class="reader-tint" id="readerTint"></div>
+      <div class="reader-dim" id="readerDim"></div>
+
+      <div class="reader-topbar" id="readerTopbar">
+        <button class="rbtn" id="rbtnBack" title="返回书架 (Esc)"></button>
+        <span class="reader-topbar__title" id="rTitle"></span>
+        <span class="reader-topbar__chapter" id="rChapter"></span>
+        <div class="reader-topbar__spacer"></div>
+        <button class="rbtn" id="rbtnBoss" title="摸鱼模式"></button>
+        <button class="rbtn" id="rbtnSearch" title="全文搜索 (Ctrl+F)"></button>
+        <button class="rbtn" id="rbtnBookmark" title="添加书签 (Ctrl+B)"></button>
+        <button class="rbtn" id="rbtnFullscreen" title="全屏 (F11)"></button>
+        <button class="rbtn" id="rbtnMore" title="阅读设置 (Ctrl+,)"></button>
+      </div>
+
+      <div class="reader-stage" id="readerStage">
+        <div class="reader-paper" id="readerPaper">
+          <div class="reader-viewport" id="readerViewport">
+            <div class="reader-clip" id="readerClip">
+              <div class="reader-columns reader-content" id="readerColumns"></div>
+            </div>
+          </div>
+          <div class="reader-scroll thin-scroll" id="readerScroll" style="display:none">
+            <div class="reader-scroll__inner reader-content" id="readerScrollInner"></div>
+          </div>
+        </div>
+
+        <div class="reader-hotzones" id="readerHotzones">
+          <div class="hotzone hotzone--prev" data-zone="prev"></div>
+          <div class="hotzone hotzone--menu" data-zone="menu"></div>
+          <div class="hotzone hotzone--next" data-zone="next"></div>
+        </div>
+
+        <div class="page-shade page-shade--left" id="pageShadeLeft"></div>
+        <div class="page-shade page-shade--right" id="pageShadeRight"></div>
+
+        <div class="reader-fabs is-hidden" id="readerFabs"></div>
+
+        <div class="reader-loading hidden" id="readerLoading"><div class="spinner"></div></div>
+
+        <div class="reader-error hidden" id="readerError">
+          <div class="empty__art" id="readerErrorIcon"></div>
+          <div class="empty__title" id="readerErrorTitle">无法打开这本书</div>
+          <div class="empty__desc" id="readerErrorDesc"></div>
+          <div class="flex gap-2">
+            <button class="btn btn--ghost" id="btnReaderErrorBack">返回书架</button>
+            <button class="btn btn--solid" id="btnReaderErrorRetry">重试</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="reader-bottombar" id="readerBottombar">
+        <span class="reader-bottombar__pos" id="rPos">第 1 / 1 页</span>
+        <div class="reader-seek" id="rSeek">
+          <div class="reader-seek__track">
+            <div class="reader-seek__fill" id="rSeekFill"></div>
+            <div class="reader-seek__marks" id="rSeekMarks"></div>
+          </div>
+        </div>
+        <span class="reader-bottombar__meta" id="rMeta"></span>
+      </div>
+
+      <!-- 目录抽屉 -->
+      <aside class="drawer drawer--left" id="drawerToc">
+        <div class="drawer__head">
+          <span class="drawer__title">目录</span>
+          <span class="text-xs text-tertiary" id="tocCount"></span>
+          <button class="btn btn--icon btn--sm" id="tocSort" title="倒序/正序"></button>
+          <button class="btn btn--icon btn--sm" id="tocClose" title="关闭"></button>
+        </div>
+        <div class="toc-search">
+          <input class="input" id="tocSearch" type="search" placeholder="搜索章节标题" autocomplete="off">
+        </div>
+        <div class="toc-list thin-scroll" id="tocList"></div>
+        <div class="toc-foot">
+          <span id="tocFootMeta"></span>
+        </div>
+      </aside>
+
+      <!-- 搜索抽屉 -->
+      <aside class="drawer drawer--left" id="drawerSearch">
+        <div class="drawer__head">
+          <span class="drawer__title">搜索</span>
+          <button class="btn btn--icon btn--sm" id="searchClose" title="关闭"></button>
+        </div>
+        <div class="toc-search">
+          <input class="input" id="readerSearchInput" type="search" placeholder="搜索全书内容，回车执行" autocomplete="off">
+        </div>
+        <div class="search-results thin-scroll" id="searchResults"></div>
+      </aside>
+
+      <!-- 书签抽屉 -->
+      <aside class="drawer drawer--left" id="drawerBookmarks">
+        <div class="drawer__head">
+          <span class="drawer__title">书签</span>
+          <button class="btn btn--icon btn--sm" id="bmClose" title="关闭"></button>
+        </div>
+        <div class="drawer__body" id="bookmarkList"></div>
+      </aside>
+
+      <!-- 阅读设置抽屉 -->
+      <aside class="drawer" id="drawerSettings">
+        <div class="drawer__head">
+          <span class="drawer__title">阅读设置</span>
+          <button class="btn btn--icon btn--sm" id="rsClose" title="关闭"></button>
+        </div>
+        <div class="drawer__body" id="readerSettingsBody"></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============ 视图：设置 ============ -->
+  <section class="view view--hidden" id="viewSettings">
+    <div class="settings-page">
+      <nav class="settings-nav" id="settingsNav"></nav>
+      <div class="settings-body thin-scroll" id="settingsBody"></div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ============ 摸鱼：正方形迷你框 ============ -->
+<div class="boss-mini is-hidden" id="bossMini">
+  <div class="boss-mini__drag"></div>
+  <div class="boss-mini__line" id="bossMiniLine"></div>
+  <button class="boss-mini__close" id="bossMiniClose" title="退出摸鱼模式（或按 Esc）" aria-label="退出摸鱼模式"></button>
+  <div class="boss-mini__body" id="bossMiniBody">
+    <div class="boss-mini__text" id="bossMiniText"></div>
+  </div>
+  <div class="boss-mini__hint">
+    <span id="bossMiniHint"></span>
+  </div>
+</div>
+
+<!-- ============ 摸鱼：伪装界面 ============ -->
+<div class="fake fake--word" id="fakeWord">
+  <div class="fake__chrome">
+    <div class="fake__tabbar">
+      <div class="fake__tab is-active"><span>会议纪要.docx</span></div>
+    </div>
+  </div>
+  <div class="fake__toolbar">
+    <span class="fake__tool">文件</span><span class="fake__tool">开始</span>
+    <span class="fake__tool">插入</span><span class="fake__tool">布局</span>
+    <span class="fake__tool">引用</span><span class="fake__tool">审阅</span>
+    <span class="fake__sep"></span>
+    <span class="fake__tool">宋体</span><span class="fake__tool">五号</span>
+    <span class="fake__sep"></span>
+    <span class="fake__tool">B</span><span class="fake__tool">I</span><span class="fake__tool">U</span>
+  </div>
+  <div class="fake__main">
+    <div class="fake-page" id="fakeWordPage"></div>
+  </div>
+  <div class="statusbar">
+    <span>第 1 页，共 3 页</span><span>1,248 个字</span>
+    <span style="flex:1"></span><span>100%</span>
+  </div>
+</div>
+
+<div class="fake fake--excel" id="fakeExcel">
+  <div class="ribbon">
+    <strong>Q3经营数据分析.xlsx</strong>
+    <span>开始</span><span>插入</span><span>公式</span>
+    <span>数据</span><span>审阅</span><span>视图</span>
+  </div>
+  <div class="fake__toolbar">
+    <span class="fake__tool">剪切</span><span class="fake__tool">复制</span>
+    <span class="fake__tool">粘贴</span><span class="fake__sep"></span>
+    <span class="fake__tool">常规</span><span class="fake__tool">%</span>
+    <span class="fake__sep"></span>
+    <span class="fake__tool">Σ 自动求和</span>
+  </div>
+  <div class="formula-bar">
+    <div class="formula-bar__cell" id="fakeExcelCell">A1</div>
+    <div class="formula-bar__fx">fx</div>
+    <div class="formula-bar__input" id="fakeExcelFormula"></div>
+  </div>
+  <div class="fake__main">
+    <div class="sheet" id="fakeExcelSheet"></div>
+  </div>
+  <div class="statusbar">
+    <span>就绪</span><span>平均值: 1,284,530</span><span>计数: 480</span>
+    <span style="flex:1"></span><span>100%</span>
+  </div>
+</div>
+
+<div class="fake fake--code" id="fakeCode">
+  <div class="fake__chrome">
+    <div class="fake__tabbar">
+      <div class="fake__tab is-active"><span>server.ts</span></div>
+      <div class="fake__tab"><span>router.ts</span></div>
+      <div class="fake__tab"><span>schema.prisma</span></div>
+    </div>
+  </div>
+  <div class="code-main">
+    <div class="activity-bar"><i class="is-on"></i><i></i><i></i><i></i></div>
+    <div class="explorer">
+      <div class="explorer__title">资源管理器</div>
+      <div class="explorer__item explorer__item--dir">▾ src</div>
+      <div class="explorer__item">　api</div>
+      <div class="explorer__item is-on">　server.ts</div>
+      <div class="explorer__item">　router.ts</div>
+      <div class="explorer__item">　db.ts</div>
+      <div class="explorer__item explorer__item--dir">▾ prisma</div>
+      <div class="explorer__item">　schema.prisma</div>
+      <div class="explorer__item explorer__item--dir">▸ tests</div>
+      <div class="explorer__item">package.json</div>
+      <div class="explorer__item">tsconfig.json</div>
+    </div>
+    <div class="code-area" id="fakeCodeArea"></div>
+  </div>
+  <div class="statusbar">
+    <span>main*</span><span>0 个错误</span><span>2 个警告</span>
+    <span style="flex:1"></span>
+    <span>Ln 42, Col 18</span><span>UTF-8</span><span>TypeScript</span>
+  </div>
+</div>
+
+<div class="fake fake--mail" id="fakeMail">
+  <div class="fake__chrome">
+    <div class="fake__tabbar">
+      <div class="fake__tab is-active"><span>收件箱 - Outlook</span></div>
+    </div>
+  </div>
+  <div class="fake__toolbar">
+    <span class="fake__tool">新建邮件</span><span class="fake__tool">回复</span>
+    <span class="fake__tool">转发</span><span class="fake__sep"></span>
+    <span class="fake__tool">删除</span><span class="fake__tool">存档</span>
+    <span class="fake__sep"></span>
+    <span class="fake__tool">筛选</span><span class="fake__tool">排序</span>
+  </div>
+  <div class="fake__main">
+    <div class="mail-side">
+      <div class="mail-side__item is-on"><span class="mail-side__dot"></span>收件箱</div>
+      <div class="mail-side__item">草稿</div>
+      <div class="mail-side__item">已发送</div>
+      <div class="mail-side__item">已删除</div>
+      <div class="mail-side__item">垃圾邮件</div>
+      <div class="mail-side__item">存档</div>
+    </div>
+    <div class="mail-list" id="fakeMailList"></div>
+    <div class="mail-view" id="fakeMailView"></div>
+  </div>
+</div>
+
+<div id="modalHost"></div>
+<div id="ctxMenuHost"></div>
+<div class="toast-host" id="toastHost"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

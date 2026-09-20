@@ -1,0 +1,1312 @@
+/* ==========================================================================
+   苍穹 · 阅读页
+   覆盖三种模式：分页（column 多列）、滚动（连续流）、摸鱼迷你框
+   ========================================================================== */
+
+.reader {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--reader-bg);
+  overflow: hidden;
+  transition: background var(--dur-base) var(--ease-out);
+}
+
+.reader.is-hidden { display: none; }
+
+/* —— 背景层（纹理/壁纸）—— */
+.reader-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-repeat: repeat;
+  background-size: 260px auto;
+  opacity: 0;
+  transition: opacity var(--dur-slow) var(--ease-out), background-image var(--dur-base) var(--ease-out);
+}
+
+.reader-bg.is-on { opacity: var(--bg-tex-opacity, 0.18); }
+
+.reader-bg--cover {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0;
+  filter: none;
+}
+
+.reader-bg--cover.is-on { opacity: var(--bg-img-opacity, 0.35); }
+
+/* 亮度/护眼滤镜层：用叠加色而非 filter，避免影响文字清晰度 */
+.reader-tint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out), background var(--dur-base) var(--ease-out);
+}
+
+.reader-tint.is-on { opacity: 1; }
+
+.reader-dim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  background: #000;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+
+/* ==========================================================================
+   阅读顶栏（沉浸式，可自动淡出）
+   ========================================================================== */
+.reader-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4);
+  z-index: 30;
+  /* 近乎不透明的衬底 + 下边界渐隐：
+     若只用「渐变到全透明」，正文会从栏底部透出来，观感很脏。 */
+  background: linear-gradient(180deg,
+      var(--reader-bg) 0%,
+      color-mix(in srgb, var(--reader-bg) 94%, transparent) 72%,
+      color-mix(in srgb, var(--reader-bg) 78%, transparent) 100%);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  /* 阅读视图下应用标题栏是隐藏的，若不在这里给拖拽能力，
+     用户就无法移动窗口 —— 这是"顶栏按住没法推动窗口"的原因。 */
+  -webkit-app-region: drag;
+  transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
+}
+
+/* 顶栏里的按钮与文字必须排除拖拽，否则点不动、也没法选中 */
+.reader-topbar .rbtn,
+.reader-topbar button,
+.reader-topbar input {
+  -webkit-app-region: no-drag;
+}
+
+.reader-topbar__title,
+.reader-topbar__chapter {
+  -webkit-app-region: no-drag;
+  cursor: default;
+}
+
+.reader-topbar.is-hidden {
+  opacity: 0;
+  transform: translateY(-12px);
+  pointer-events: none;
+}
+
+.reader-topbar__title {
+  font-size: var(--fs-base);
+  color: var(--reader-ink-soft);
+  font-weight: var(--fw-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 42%;
+}
+
+.reader-topbar__chapter {
+  font-size: var(--fs-sm);
+  color: var(--reader-ink-soft);
+  opacity: 0.72;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  text-align: center;
+}
+
+.reader-topbar__spacer {
+  flex: 1;
+  /* 顶栏空白处按住可拖动窗口（实际拖动由 JS 实现，
+     见 views/reader.js#bindWindowDrag）。光标给出可拖动的提示。 */
+  cursor: move;
+  align-self: stretch;
+}
+
+/* 拖动窗口期间的全局反馈 */
+body.is-dragging-window,
+body.is-dragging-window * {
+  cursor: move !important;
+  user-select: none !important;
+}
+
+.rbtn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-md);
+  display: grid;
+  place-items: center;
+  color: var(--reader-ink-soft);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  flex: 0 0 auto;
+}
+
+.rbtn:hover { background: rgba(128, 128, 128, 0.14); color: var(--reader-ink); }
+.rbtn.is-on { color: var(--c-accent); background: var(--c-accent-soft); }
+.rbtn svg { width: 17px; height: 17px; }
+
+/* ==========================================================================
+   正文容器
+   ========================================================================== */
+.reader-stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  z-index: 3;
+  overflow: hidden;
+}
+
+/**
+ * 阅读区容器。左侧抽屉打开时整体右移让位，同时触发重新排版 ——
+ * 让抽屉"推开"内容，而不是覆盖切断文字。
+ */
+.reader-paper {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  transition: box-shadow var(--dur-base) var(--ease-out),
+              left var(--dur-slow) var(--ease-out);
+}
+
+.reader.is-left-drawer .reader-paper {
+  left: 330px;
+}
+
+/* —— 分页模式：CSS 多列 —— */
+/**
+ * 可视窗口。必须显式撑满纸张（inset: 0）。
+ * ⚠ 若不设 inset，position:absolute 的元素尺寸会由内容决定，
+ *   而内层的裁剪层用 inset:0 定位——它依赖祖先有确定的尺寸，
+ *   于是裁剪层塌成 0×0，再叠加页边距 padding 后内容宽度为 0，
+ *   正文整页空白（这是加裁剪层时踩到的回归）。
+ */
+.reader-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/**
+ * 单页裁剪层。这是分页模式能"只看到一页"的关键。
+ *
+ * ⚠ 不能用 padding 来做这件事！
+ *   padding 只影响内容起始位置，**不参与裁剪** —— overflow:hidden
+ *   永远只在「边框盒」边缘裁，内边距区域照样会被绘出。
+ *   于是下一列会从右边距区域露出来（用户反馈的"两侧有别的文字"）。
+ *
+ * 正确做法：把这一层按「单页可用区域」精确定位并设定尺寸，
+ *   让它恰好等于一页的大小，再由它自己的 overflow:hidden 裁掉
+ *   所有相邻列。left/top/width/height 由 Paginator 计算后写入。
+ */
+.reader-clip {
+  position: absolute;
+  overflow: hidden;
+}
+
+.reader-columns {
+  column-fill: auto;
+  column-gap: var(--reader-page-gap);
+  height: 100%;
+  transition: transform var(--dur-base) var(--ease-out);
+  will-change: transform;
+}
+
+.reader-columns.is-instant { transition: none; }
+
+/* ==========================================================================
+   连续滚动：章节块与章节分隔
+   ========================================================================== */
+
+/**
+ * 每个章节一个块。块之间留出一点呼吸感，
+ * 但绝不显示"上一章/下一章"按钮 —— 连续阅读靠滚动，不靠点按钮。
+ */
+.chapter-block {
+  position: relative;
+}
+
+.chapter-block + .chapter-block {
+  margin-top: 2.2em;
+}
+
+/**
+ * 章节分隔线。作用是在无缝滚动里给出"这里换章了"的视觉锚点，
+ * 同时提示下一章标题，避免读者不知道自己读到哪了。
+ */
+.chapter-break {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 3.2em 0 1.4em;
+  text-indent: 0;
+  opacity: 0.45;
+  user-select: none;
+}
+
+.chapter-break__line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--bd-base), transparent);
+}
+
+.chapter-break__next {
+  font-size: var(--fs-sm);
+  color: var(--reader-ink-soft);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chapter-break__next::after {
+  content: ' ↓';
+  opacity: 0.6;
+}
+
+/* —— 滚动模式 —— */
+.reader-scroll {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: auto;
+  overscroll-behavior: contain;
+  /**
+   * ⚠ 左右页边距不一致的根因就在这里。
+   *
+   *   滚动条是**参与布局**的：它占据容器右侧约 8~10px。
+   *   .reader-scroll__inner 的左右 padding 都是 --reader-ml/mr（相等），
+   *   但右侧还要再减去滚动条的宽度 —— 于是视觉上左边距 > 右边距。
+   *   滚动条本身几乎看不见（透明轨道 + 细滑块），用户只会感觉
+   *   "右边贴边了、左边空一截"，却找不到原因。
+   *
+   *   scrollbar-gutter: stable both-edges 让容器在**两侧**都预留
+   *   等宽的空间，左右立刻对称；同时 stable 保证滚动条出现/消失时
+   *   排版不跳动。
+   */
+  scrollbar-gutter: stable both-edges;
+}
+
+.reader-scroll.is-smooth { scroll-behavior: smooth; }
+
+.reader-scroll__inner {
+  /* 上下留出顶栏/底栏的安全间距，避免正文被半透明控件压住 */
+  padding: calc(var(--reader-mt) + 58px) var(--reader-mr)
+           calc(var(--reader-mb) + 50px) var(--reader-ml);
+  /* ⚠ 必须用 none 而不是 0px。
+     变量 --reader-max-width 在「自适应」时值为 0px，若直接作为 max-width，
+     容器宽度会塌成 0 —— 中文没有断词机会，于是每个字独占一行。
+     这是滚动模式出现「一字一行」的直接原因。 */
+  max-width: var(--reader-max-width, none);
+  margin: 0 auto;
+}
+
+/* ==========================================================================
+   正文排版：所有阅读参数都通过 CSS 变量控制
+   ========================================================================== */
+.reader-content {
+  font-family: var(--font-reading);
+  font-size: var(--reader-font-size);
+  line-height: var(--reader-line-height);
+  letter-spacing: var(--reader-letter-spacing);
+  font-weight: var(--reader-font-weight);
+  color: var(--reader-ink);
+  text-align: var(--reader-text-align);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  /* 中英文混排优化 */
+  text-justify: inter-ideograph;
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures;
+  font-feature-settings: "kern" 1, "liga" 1;
+  -webkit-font-smoothing: antialiased;
+  user-select: text;
+  cursor: text;
+}
+
+.reader-content p {
+  margin: 0 0 var(--reader-para-spacing);
+  text-indent: var(--reader-para-indent);
+  orphans: 2;
+  widows: 2;
+}
+
+.reader-content p:last-child { margin-bottom: 0; }
+
+/* 对话行（以引号或破折号开头）不缩进，更接近纸书排版 */
+.reader-content p:first-of-type { margin-top: 0; }
+
+.reader-content h1,
+.reader-content h2,
+.reader-content h3,
+.reader-content h4,
+.reader-content h5,
+.reader-content h6 {
+  font-weight: var(--fw-bold);
+  text-indent: 0;
+  margin: 1.4em 0 0.8em;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.reader-content h1 { font-size: 1.5em; }
+.reader-content h2 { font-size: 1.3em; }
+.reader-content h3 { font-size: 1.15em; }
+
+.reader-content blockquote {
+  margin: 1em 0;
+  padding: 0.4em 0 0.4em 1.1em;
+  border-left: 3px solid var(--c-accent-soft);
+  color: var(--reader-ink-soft);
+  text-indent: 0;
+}
+
+.reader-content blockquote p { text-indent: 0; }
+
+.reader-content img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 1em auto;
+  border-radius: var(--r-sm);
+}
+
+.reader-content hr {
+  border: none;
+  border-top: 1px solid var(--bd-base);
+  margin: 1.6em 0;
+}
+
+.reader-content ul,
+.reader-content ol { margin: 0.6em 0; padding-left: 2em; }
+.reader-content li { margin-bottom: 0.3em; text-indent: 0; }
+
+.reader-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+  font-size: 0.94em;
+}
+
+.reader-content td,
+.reader-content th {
+  border: 1px solid var(--bd-base);
+  padding: 0.4em 0.6em;
+  text-indent: 0;
+}
+
+/* —— 章节标题（正文顶部）—— */
+.chapter-heading {
+  font-size: 1.35em;
+  font-weight: var(--fw-bold);
+  text-align: left;
+  text-indent: 0;
+  margin: 0 0 1.2em;
+  padding-bottom: 0.5em;
+  border-bottom: 1px solid var(--bd-subtle);
+  color: var(--reader-ink);
+  line-height: 1.4;
+}
+
+/* 分页模式下章节标题不做分栏断裂 */
+.chapter-heading { break-after: avoid; }
+
+/* ==========================================================================
+   翻页动画
+   ========================================================================== */
+/* 平滑位移 */
+.reader--anim-slide .reader-columns {
+  transition: transform var(--page-dur, 260ms) var(--ease-out);
+}
+
+/* 淡入淡出 */
+.reader--anim-fade .reader-columns { transition: none; }
+.reader--anim-fade .reader-paper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--reader-bg);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.reader--anim-fade.is-turning .reader-paper::after {
+  animation: pageFade var(--page-dur, 260ms) var(--ease-out);
+}
+
+@keyframes pageFade {
+  0% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
+/* 仿真翻页（3D 折角阴影） */
+.reader--anim-flip .reader-paper { perspective: var(--skin-page-turn-perspective, 1600px); }
+
+.reader--anim-flip .reader-columns {
+  transform-style: preserve-3d;
+  transform-origin: left center;
+  transition: transform var(--page-dur, 260ms) var(--ease-in-out);
+}
+
+.page-shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 64px;
+  pointer-events: none;
+  z-index: 12;
+  opacity: 0;
+  transition: opacity var(--page-dur, 260ms) var(--ease-out);
+}
+
+.page-shade--left {
+  left: 0;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.16), transparent);
+  border-left: 1px solid var(--bd-subtle);
+}
+
+.page-shade--right {
+  right: 0;
+  background: linear-gradient(270deg, rgba(0, 0, 0, 0.16), transparent);
+  border-right: 1px solid var(--bd-subtle);
+}
+
+.reader--anim-flip.is-turning .page-shade { opacity: 1; }
+
+/* 无动画 */
+.reader--anim-none .reader-columns { transition: none !important; }
+
+/* ==========================================================================
+   底部控制条（页码 / 进度）
+   ========================================================================== */
+.reader-bottombar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-5);
+  z-index: 30;
+  background: linear-gradient(0deg,
+      var(--reader-bg) 0%,
+      color-mix(in srgb, var(--reader-bg) 94%, transparent) 72%,
+      color-mix(in srgb, var(--reader-bg) 78%, transparent) 100%);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
+}
+
+.reader-bottombar.is-hidden {
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+}
+
+.reader-bottombar__pos {
+  font-size: var(--fs-sm);
+  color: var(--reader-ink-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.reader-bottombar__meta {
+  font-size: var(--fs-sm);
+  color: var(--reader-ink-soft);
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+.reader-seek {
+  flex: 1;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+}
+
+.reader-seek__track {
+  width: 100%;
+  height: 3px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--reader-ink) 16%, transparent);
+  overflow: hidden;
+  position: relative;
+}
+
+.reader-seek__fill {
+  height: 100%;
+  background: var(--c-accent);
+  border-radius: var(--r-full);
+  transition: width var(--dur-base) var(--ease-out);
+}
+
+.reader-seek__marks {
+  position: absolute;
+  inset: 0;
+}
+
+.reader-seek__mark {
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--reader-ink) 55%, transparent);
+  transform: translateY(-50%);
+}
+
+.reader-seek:hover .reader-seek__track { height: 5px; }
+
+.seek-tip {
+  position: absolute;
+  bottom: 24px;
+  transform: translateX(-50%);
+  padding: 4px 9px;
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  color: var(--tx-primary);
+  font-size: var(--fs-xs);
+  box-shadow: var(--sh-md);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 40;
+}
+
+/* ==========================================================================
+   点击区（左中右）
+   ========================================================================== */
+/**
+ * 点击热区。
+ *
+ * ⚠ 这里必须是 pointer-events: none。
+ *
+ * 这一层以 inset:0 铺满整个阅读区、z-index:20，压在正文之上。
+ * 早期版本让它接收点击，结果是两类问题同时出现：
+ *   1. 滚轮事件落在热区上，而热区并不是滚动容器的后代，
+ *      原生滚动不会发生 → "滚轮没法上下滚动文章"；
+ *   2. 章末的「上一章 / 下一章 / 目录」按钮被热区挡住，
+ *      点击被热区吞掉 → "按钮点不了"。
+ *
+ * 现在改为完全透传：正文、按钮、图片、文字选择、原生滚动全部正常，
+ * 翻页区域改由 JS 按坐标判定（见 ReaderView.bindEvents）。
+ */
+.reader-hotzones {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  pointer-events: none;
+}
+
+.reader-hotzones .hotzone { pointer-events: none; }
+
+.hotzone {
+  height: 100%;
+}
+
+.hotzone--prev { width: 22%; }
+.hotzone--menu { flex: 1; }
+.hotzone--next { width: 22%; }
+
+/* ==========================================================================
+   浮动工具条（自动翻页 / 快捷操作）
+   ========================================================================== */
+.reader-fabs {
+  position: absolute;
+  right: var(--sp-5);
+  bottom: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  z-index: 32;
+  transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
+}
+
+.reader-fabs.is-hidden { opacity: 0; transform: translateX(12px); pointer-events: none; }
+
+.fab {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--bd-subtle);
+  box-shadow: var(--sh-md);
+  color: var(--tx-secondary);
+  transition: all var(--dur-fast) var(--ease-out);
+}
+
+.fab:hover { color: var(--tx-primary); transform: scale(1.06); box-shadow: var(--sh-lg); }
+.fab.is-on { color: var(--c-accent); border-color: var(--c-accent); background: var(--c-accent-soft); }
+.fab svg { width: 17px; height: 17px; }
+
+/* 自动滚动速度指示 */
+.autoscroll-indicator {
+  position: absolute;
+  top: 60px;
+  right: var(--sp-5);
+  z-index: 32;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--bd-subtle);
+  box-shadow: var(--sh-md);
+  font-size: var(--fs-xs);
+  color: var(--tx-secondary);
+  animation: fadeIn var(--dur-base) var(--ease-out);
+}
+
+.autoscroll-indicator button {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--tx-secondary);
+}
+
+.autoscroll-indicator button:hover { background: var(--bg-hover); color: var(--tx-primary); }
+
+.autoscroll-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-accent);
+  animation: pulse 1.6s var(--ease-in-out) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+
+/* ==========================================================================
+   章末 / 章首导航
+   ========================================================================== */
+.chapter-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: 2.4em 0 1em;
+  border-top: 1px solid var(--bd-subtle);
+  margin-top: 2em;
+  text-indent: 0;
+}
+
+.chapter-nav__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 38px;
+  padding: 0 var(--sp-5);
+  border-radius: var(--r-full);
+  border: 1px solid var(--bd-base);
+  color: var(--reader-ink-soft);
+  font-size: var(--fs-base);
+  background: color-mix(in srgb, var(--reader-bg) 70%, var(--bg-surface) 30%);
+  transition: all var(--dur-fast) var(--ease-out);
+  text-indent: 0;
+}
+
+.chapter-nav__btn:hover {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+  background: var(--c-accent-soft);
+}
+
+.chapter-nav__btn[disabled] { opacity: 0.35; pointer-events: none; }
+
+/* ==========================================================================
+   加载 / 错误态
+   ========================================================================== */
+.reader-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--reader-bg);
+  z-index: 40;
+}
+
+.spinner {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2.5px solid var(--bd-base);
+  border-top-color: var(--c-accent);
+  animation: spin 0.75s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.reader-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-8);
+  background: var(--reader-bg);
+  z-index: 40;
+  text-align: center;
+}
+
+/* ==========================================================================
+   摸鱼模式：正方形迷你框
+   只有文字、无选项、无程序边框 —— 你指定的形态
+   ========================================================================== */
+.boss-mini {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-boss);
+  background: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.boss-mini.is-hidden { display: none; }
+
+.boss-mini__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 22px 20px 20px;
+  position: relative;
+  cursor: default;
+}
+
+/* 迷你框正文：紧凑排版，字号随框缩放 */
+.boss-mini__text {
+  font-family: var(--font-reading);
+  font-size: calc(var(--reader-font-size) * 0.9);
+  line-height: 1.72;
+  letter-spacing: 0.01em;
+  color: var(--reader-ink);
+  text-align: left;
+  user-select: text;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.boss-mini__text p {
+  margin: 0 0 0.62em;
+  text-indent: 2em;
+}
+
+.boss-mini__text p:last-child { margin-bottom: 0; }
+
+/* 顶部极细进度线：唯一允许的视觉提示，几乎不可见 */
+.boss-mini__line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: color-mix(in srgb, var(--c-accent) 55%, transparent);
+  opacity: 0.5;
+  transition: width var(--dur-base) var(--ease-out);
+  width: 0;
+}
+
+/* 悬停时才出现的极简翻页提示 */
+.boss-mini__hint {
+  position: absolute;
+  bottom: 6px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
+  pointer-events: none;
+}
+
+.boss-mini:hover .boss-mini__hint { opacity: 0.4; }
+
+.boss-mini__hint span {
+  font-size: 10px;
+  color: var(--tx-tertiary);
+  letter-spacing: 0.05em;
+}
+
+/**
+ * 迷你框拖拽区。
+ *
+ * ⚠ 刻意不用 -webkit-app-region: drag。
+ *   理由见 views/boss.js#bindMiniDrag：CSS 拖拽区会吞掉鼠标事件
+ *   （双击退不出来），且 Windows 会把它当成标题栏（双击就最大化全屏）。
+ *   这里只做视觉上的"可拖动"提示，实际拖动由 JS 实现。
+ */
+.boss-mini__drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  cursor: move;
+  z-index: 3;
+  background: transparent;
+}
+
+body.is-dragging-mini,
+body.is-dragging-mini * {
+  cursor: move !important;
+  user-select: none !important;
+}
+
+/**
+ * 退出按钮。
+ *
+ * 设计取舍：用户的原始要求是「只有文字，无选项，无边框」——
+ * 一个悬停即显的圆形按钮会破坏这种纯粹感。
+ * 但完全不提供可点击的退出入口，又会让不熟悉快捷键的人陷入
+ * 「进得去出不来」（这个坑已经踩过一次）。
+ *
+ * 折中方案：按钮**不可见、不占视觉**，但始终存在并可点击 ——
+ * 位置固定在右上角一角的透明热区。鼠标移上去时只做一个极轻的
+ * 反差提示（不是按钮外观，只是一小块凝色），既守住"只有文字"，
+ * 又保证任何情况下都能退出。
+ */
+.boss-mini__close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 0 0 0 6px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  line-height: 1;
+  color: transparent;                 /* 图标默认完全不可见 */
+  background: transparent;
+  border: none;
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+  z-index: 4;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+/* 鼠标移到该角落时才给出极轻的提示 —— 不做成"按钮"外观 */
+.boss-mini__close:hover {
+  color: var(--tx-secondary);
+  background: color-mix(in srgb, var(--tx-tertiary) 26%, transparent);
+  opacity: 0.9;
+}
+
+/* 进出摸鱼时的整体过渡，避免生硬闪切 */
+.boss-mini {
+  animation: bossIn var(--dur-base) var(--ease-out);
+}
+
+@keyframes bossIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ==========================================================================
+   伪装界面（Word / Excel / VS Code / 邮件）
+   ========================================================================== */
+.fake {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-boss);
+  display: none;
+  font-family: var(--font-ui);
+  overflow: hidden;
+}
+
+.fake.is-on { display: flex; flex-direction: column; }
+
+/* —— 通用伪装外壳 —— */
+.fake__chrome {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: #f3f3f3;
+  border-bottom: 1px solid #d4d4d4;
+}
+
+.fake__tabbar {
+  display: flex;
+  align-items: flex-end;
+  background: #f3f3f3;
+  padding: 6px 8px 0;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.fake__tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 5px 5px 0 0;
+  font-size: 12px;
+  color: #444;
+  background: #e6e6e6;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+}
+
+.fake__tab.is-active {
+  background: #fff;
+  color: #1a1a1a;
+  font-weight: 500;
+}
+
+.fake__toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 34px;
+  padding: 0 12px;
+  background: #fafafa;
+  border-bottom: 1px solid #e3e3e3;
+  font-size: 11.5px;
+  color: #555;
+  overflow: hidden;
+}
+
+.fake__tool {
+  padding: 3px 7px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.fake__tool:hover { background: #ebebeb; }
+
+.fake__sep { width: 1px; height: 16px; background: #dcdcdc; }
+
+.fake__main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+/* —— Word —— */
+.fake--word .fake__main { background: #808080; justify-content: center; padding: 22px 0; overflow: auto; }
+
+.fake-page {
+  width: 700px;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  padding: 68px 76px;
+  font-family: "Times New Roman", "SimSun", serif;
+  font-size: 14.5px;
+  line-height: 1.85;
+  color: #1a1a1a;
+  overflow: hidden;
+}
+
+.fake-page h1 {
+  font-size: 17px;
+  text-align: center;
+  font-weight: 600;
+  margin: 0 0 22px;
+  font-family: "Microsoft YaHei", sans-serif;
+}
+
+.fake-page p { margin: 0 0 12px; text-indent: 2em; }
+
+.fake-page .doc-no { text-indent: 0; font-weight: 600; margin-top: 18px; }
+
+/* —— Excel —— */
+.fake--excel .fake__main { flex-direction: column; background: #fff; }
+
+.ribbon {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 46px;
+  padding: 0 14px;
+  background: #217346;
+  color: #fff;
+  font-size: 12px;
+}
+
+.ribbon span { opacity: 0.92; white-space: nowrap; }
+.ribbon strong { font-weight: 600; opacity: 1; }
+
+.formula-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  height: 26px;
+  border-bottom: 1px solid #d4d4d4;
+  font-size: 12px;
+  background: #fff;
+}
+
+.formula-bar__cell {
+  width: 92px;
+  text-align: center;
+  border-right: 1px solid #d4d4d4;
+  color: #333;
+  flex: 0 0 auto;
+}
+
+.formula-bar__fx {
+  padding: 0 10px;
+  color: #666;
+  font-style: italic;
+  border-right: 1px solid #e0e0e0;
+  flex: 0 0 auto;
+}
+
+.formula-bar__input { flex: 1; padding: 0 8px; color: #333; font-family: var(--font-mono); font-size: 11.5px; }
+
+.sheet {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: #fff;
+}
+
+.sheet table {
+  border-collapse: collapse;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: #222;
+  table-layout: fixed;
+}
+
+.sheet th,
+.sheet td {
+  border: 1px solid #d4d4d4;
+  height: 19px;
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 78px;
+}
+
+.sheet thead th,
+.sheet .row-head {
+  background: #f5f5f5;
+  color: #555;
+  text-align: center;
+  font-weight: 400;
+  font-size: 11px;
+  min-width: 40px;
+  position: sticky;
+  top: 0;
+}
+
+.sheet .row-head { position: sticky; left: 0; top: auto; }
+
+.sheet .cell-num { color: #1f4e79; }
+
+.statusbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 22px;
+  padding: 0 12px;
+  background: #f3f3f3;
+  border-top: 1px solid #d4d4d4;
+  font-size: 11px;
+  color: #444;
+}
+
+/* —— VS Code —— */
+.fake--code { background: #1e1e1e; }
+
+.fake--code .fake__chrome { background: #323233; border-bottom-color: #252526; }
+.fake--code .fake__tabbar { background: #252526; }
+.fake--code .fake__tab { background: #2d2d2d; color: #969696; border-radius: 0; height: 30px; }
+.fake--code .fake__tab.is-active { background: #1e1e1e; color: #fff; }
+
+.code-main { flex: 1; min-height: 0; display: flex; overflow: hidden; background: #1e1e1e; }
+
+.activity-bar {
+  width: 48px;
+  flex: 0 0 auto;
+  background: #333333;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 10px;
+  gap: 16px;
+}
+
+.activity-bar i {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: #555;
+  display: block;
+  opacity: 0.55;
+}
+
+.activity-bar i.is-on { opacity: 1; background: #007acc; }
+
+.explorer {
+  width: 190px;
+  flex: 0 0 auto;
+  background: #252526;
+  border-right: 1px solid #333;
+  padding: 8px 0;
+  font-size: 12px;
+  color: #ccc;
+  overflow: hidden;
+}
+
+.explorer__title {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8a8a8a;
+  padding: 6px 12px;
+}
+
+.explorer__item { padding: 3px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.explorer__item.is-on { background: #37373d; color: #fff; }
+.explorer__item--dir { color: #d4d4d4; font-weight: 500; }
+
+.code-area {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 10px 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.62;
+}
+
+.code-line { display: flex; white-space: pre; }
+.code-line__no {
+  width: 52px;
+  flex: 0 0 auto;
+  text-align: right;
+  padding-right: 18px;
+  color: #858585;
+  user-select: none;
+}
+.code-line__txt { color: #d4d4d4; }
+
+.tk-kw { color: #569cd6; }
+.tk-str { color: #ce9178; }
+.tk-fn { color: #dcdcaa; }
+.tk-cm { color: #6a9955; font-style: italic; }
+.tk-num { color: #b5cea8; }
+.tk-typ { color: #4ec9b0; }
+.tk-var { color: #9cdcfe; }
+.tk-op { color: #d4d4d4; }
+
+.cursor {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.05em;
+  background: #aeafad;
+  vertical-align: text-bottom;
+  animation: blink 1.1s step-end infinite;
+}
+
+@keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+
+.fake--code .statusbar { background: #007acc; color: #fff; border-top-color: #007acc; }
+
+/* —— 邮件 —— */
+.fake--mail .fake__main { flex-direction: row; background: #fff; }
+
+.mail-side {
+  width: 178px;
+  flex: 0 0 auto;
+  background: #faf9f8;
+  border-right: 1px solid #e1dfdd;
+  padding: 10px 0;
+  font-size: 12.5px;
+  color: #323130;
+}
+
+.mail-side__item { padding: 6px 16px; display: flex; gap: 8px; align-items: center; }
+.mail-side__item.is-on { background: #edebe9; font-weight: 600; }
+.mail-side__dot { width: 6px; height: 6px; border-radius: 50%; background: #0078d4; }
+
+.mail-list {
+  width: 300px;
+  flex: 0 0 auto;
+  border-right: 1px solid #e1dfdd;
+  overflow: hidden;
+}
+
+.mail-row {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f3f2f1;
+  font-size: 12.5px;
+  color: #323130;
+}
+
+.mail-row.is-on { background: #eff6fc; border-left: 3px solid #0078d4; padding-left: 11px; }
+.mail-row__from { font-weight: 600; margin-bottom: 2px; }
+.mail-row__subj { color: #201f1e; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-row__pre { color: #605e5c; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mail-view {
+  flex: 1;
+  min-width: 0;
+  padding: 22px 28px;
+  overflow: auto;
+  font-size: 13px;
+  color: #201f1e;
+  line-height: 1.7;
+}
+
+.mail-view h2 { font-size: 17px; font-weight: 600; margin: 0 0 12px; }
+.mail-view__meta { color: #605e5c; font-size: 12px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid #edebe9; }
+.mail-view p { margin: 0 0 12px; }
+
+/* 任务栏图标伪装（标题由主进程设置） */
+[data-fake-active="true"] .titlebar { display: none; }
+
+/* ==========================================================================
+   迷你框专用尺寸
+   ========================================================================== */
+body.is-boss-square #app { display: none; }
+body.is-boss-square .boss-mini { display: flex; }
+
+body.is-boss-ghost #app { opacity: 0.5; }

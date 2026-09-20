@@ -1,0 +1,72 @@
+appId: com.firmament.reader
+productName: 苍穹
+copyright: Copyright © 2026 Firmament Reader
+
+directories:
+  output: dist
+  buildResources: build
+
+# 只打包运行必需的文件，避免把测试样本、截图、临时文件塞进安装包
+files:
+  - src/**/*
+  - package.json
+  # ⚠ @fontsource 只是「字体来源」，实际用到的字体已转换/复制到
+  #   src/renderer/assets/fonts/ 并由 styles/fonts.css 引用。
+  #   但它们在 devDependencies 之外仍可能被整包带上（含几十个
+  #   unicode-range 分片、每个字体的 woff 与 woff2 双份），约 28MB
+  #   纯属浪费 —— 必须排除。
+  - "!node_modules/@fontsource/**"
+  - "!**/node_modules/**/{test,tests,__tests__,example,examples,doc,docs}/**"
+  - "!**/*.map"
+  - "!**/.bin"
+  - "!**/*.md"
+  - "!**/*.ts"
+  - "!**/.git*"
+
+# 打包后仍需要解压出来的原生依赖（本应用无原生模块，保留空配置以便后续扩展）
+asar: true
+asarUnpack: []
+
+# ⚠ 只产出「免安装 zip 绿色版」。
+#
+#   此前同时产出 nsis 安装包 + portable 便携版，每个都是独立完整的一份
+#   Electron 运行时（各约 120MB），加上 win-unpacked 的解压态，
+#   dist 目录白白多占 250MB 以上 —— 而三种产物本质是同一份东西。
+#   现在统一为：win-unpacked（构建中间产物）→ 压缩成 zip → 自动解压到 dist/run。
+#
+#   体积精简的关键不在压缩算法，而在**剔除无用载荷**：
+#     · locales：Electron 自带 55 种语言包，共约 49MB，只留 zh-CN
+#     · LICENSES.chromium.html：20MB 的许可证清单，阅读器用不上
+#     · dxcompiler / dxil / vk_swiftshader：D3D 与 Vulkan 着色器编译器，
+#       本应用不碰 3D，可安全移除
+#   这几项合计约 100MB，是"好几百 MB"的主要来源。
+win:
+  target:
+    - target: dir
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: 苍穹-${version}-${arch}.${ext}
+  requestedExecutionLevel: asInvoker
+
+# ⚠ 不要用 electronLanguages 来精简语言包。
+#
+#   它确实能删掉多余的 locale，但手段是"一次性删除 70+ 个文件"，
+#   会撞上本机安全策略的批量删除拦截（阈值 50），导致整个构建失败：
+#     [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] count=79
+#   改为在 build/pack.js 里"压缩时排除"——不删任何文件，
+#   效果完全相同，且不触碰批量删除限制。
+
+portable:
+  artifactName: 苍穹-便携版-${version}.${ext}
+  requestExecutionLevel: user
+
+# 不联外网：关闭所有自动更新与代码签名探测
+publish: null
+npmRebuild: false
+
+# 压缩级别用 normal 而非 maximum。
+# maximum 会把构建时间从约 30 秒拉长到 10 分钟以上（内置字体含一个 11MB 的 TTF，
+# 高压缩比收益却只有几 MB），对开发者体验是净损失。
+compression: normal
+removePackageScripts: true
+buildDependenciesFromSource: false

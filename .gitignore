@@ -1,0 +1,39 @@
+# 依赖
+node_modules/
+
+# 工具内部工作记录（开发过程日志，非项目源码）
+.workbuddy/
+
+# 构建产物（可由 npm run build 重新生成）
+dist/
+.srcpack/
+.verify/
+
+# 界面截图（可由 npm run shots 重新生成，约 5MB 二进制）
+test/shots/
+
+# 生成的图标（由 build/make-icon.js 生成）
+build/icon.ico
+build/icon.png
+
+# ⚠ dist/ 下曾放过用户的私人书籍（dist/小说/）。
+#   即便 dist/ 已整体忽略，这里再显式声明一次，
+#   防止有人把书挪到别处后又误提交。
+#   注意：不要写 `*.epub` —— 那会误伤 test/samples/ 下的
+#   合法测试样本（沧海月明.epub），它是测试用例的一部分。
+小说/
+
+# 打包暂存
+*.zip
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# 日志与临时文件
+*.log
+_repo.json
+_src.json
+crash.log

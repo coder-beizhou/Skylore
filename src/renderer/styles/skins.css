@@ -1,0 +1,191 @@
+/* ==========================================================================
+   苍穹 · 皮肤（Skin）
+   皮肤与主题正交：
+     主题决定「颜色」（日间/夜间/护眼…）
+     皮肤决定「质感与形态」（极简 / 拟物）
+   两者自由组合，共 6 主题 × 2 皮肤 = 12 种观感。
+   ========================================================================== */
+
+/* ==========================================================================
+   皮肤 A：极简（minimal）—— 微信读书式，通透留白、控件悬浮淡出
+   ========================================================================== */
+[data-skin="minimal"] {
+  --skin-card-radius: var(--r-lg);
+  --skin-card-shadow: var(--sh-sm);
+  --skin-card-shadow-hover: var(--sh-lg);
+  --skin-titlebar-bg: var(--bg-surface);
+  --skin-panel-radius: var(--r-xl);
+  --skin-book-spine: 0px;
+  --skin-reader-inset-shadow: none;
+  --skin-reader-frame: none;
+  --skin-paper-edge: none;
+  --skin-page-turn-perspective: 1600px;
+  --skin-ui-blur: 20px;
+  --skin-divider: 1px solid var(--bd-subtle);
+  --skin-shelf-bg: transparent;
+}
+
+[data-skin="minimal"] .library-card {
+  border: 1px solid var(--bd-subtle);
+  background: var(--bg-surface);
+}
+
+[data-skin="minimal"] .library-card:hover {
+  transform: translateY(-4px);
+}
+
+[data-skin="minimal"] .reader-surface {
+  box-shadow: none;
+}
+
+/* ==========================================================================
+   皮肤 B：拟物（skeuomorphic）—— 纸质书卷、木架、皮革
+   ========================================================================== */
+[data-skin="skeuo"] {
+  --skin-card-radius: 6px 10px 10px 6px;
+  --skin-card-shadow: 0 3px 8px rgba(40, 28, 14, 0.22), 0 1px 2px rgba(40, 28, 14, 0.16);
+  --skin-card-shadow-hover: 0 16px 34px rgba(40, 28, 14, 0.32), 0 3px 8px rgba(40, 28, 14, 0.2);
+  --skin-titlebar-bg: linear-gradient(180deg,
+      color-mix(in srgb, var(--bg-surface) 96%, #000 4%),
+      var(--bg-surface));
+  --skin-panel-radius: 10px;
+  --skin-book-spine: 9px;
+  --skin-reader-inset-shadow:
+    inset 0 0 42px rgba(120, 96, 60, 0.14),
+    inset 0 0 6px rgba(120, 96, 60, 0.1);
+  --skin-reader-frame:
+    inset 0 0 0 1px rgba(120, 96, 60, 0.14);
+  --skin-paper-edge:
+    linear-gradient(90deg,
+      rgba(140, 116, 78, 0.2) 0,
+      rgba(140, 116, 78, 0.06) 3px,
+      transparent 14px);
+  --skin-page-turn-perspective: 1100px;
+  --skin-ui-blur: 6px;
+  --skin-divider: 1px solid rgba(120, 96, 60, 0.22);
+  --skin-shelf-bg: linear-gradient(180deg,
+      color-mix(in srgb, var(--bg-app) 92%, #6b4f2a 8%),
+      color-mix(in srgb, var(--bg-app) 86%, #4a3418 14%));
+}
+
+/* 拟物皮肤的标题栏：木纹质感 */
+[data-skin="skeuo"] .titlebar {
+  background: linear-gradient(180deg,
+      color-mix(in srgb, var(--bg-surface) 90%, #6b4f2a 10%) 0%,
+      color-mix(in srgb, var(--bg-surface) 96%, #6b4f2a 4%) 100%);
+  border-bottom: 1px solid rgba(90, 66, 34, 0.3);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset;
+}
+
+[data-theme="night"][data-skin="skeuo"] .titlebar,
+[data-theme="mint"][data-skin="skeuo"] .titlebar {
+  background: linear-gradient(180deg, #2a2418 0%, #221d14 100%);
+  border-bottom-color: rgba(0, 0, 0, 0.5);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+}
+
+/* 拟物皮肤：书脊高光 */
+[data-skin="skeuo"] .library-card__cover::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 9px;
+  background: linear-gradient(90deg,
+      rgba(0, 0, 0, 0.34) 0%,
+      rgba(0, 0, 0, 0.14) 42%,
+      rgba(255, 255, 255, 0.16) 68%,
+      rgba(255, 255, 255, 0.05) 100%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* 拟物皮肤：书页顶边高光 */
+[data-skin="skeuo"] .library-card__cover::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), transparent);
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* 拟物皮肤：书架木质底板 */
+[data-skin="skeuo"] .shelf-board {
+  display: block;
+  height: 14px;
+  border-radius: 3px;
+  background: linear-gradient(180deg,
+      color-mix(in srgb, #8a6234 82%, #fff 18%) 0%,
+      #6b4a24 60%,
+      #4d3519 100%);
+  box-shadow: 0 3px 7px rgba(30, 18, 6, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  position: relative;
+}
+
+[data-skin="skeuo"] .shelf-board::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 3px;
+  background-image: repeating-linear-gradient(90deg,
+      transparent 0 22px,
+      rgba(0, 0, 0, 0.07) 22px 23px);
+  opacity: 0.5;
+}
+
+[data-skin="minimal"] .shelf-board { display: none; }
+
+/* 拟物皮肤：阅读区纸张质感 */
+[data-skin="skeuo"] .reader-paper {
+  background-image:
+    repeating-linear-gradient(0deg, rgba(120, 96, 60, 0.022) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(120, 96, 60, 0.016) 0 1px, transparent 1px 4px);
+  box-shadow: var(--skin-reader-inset-shadow);
+}
+
+[data-skin="skeuo"] .reader-paper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: var(--skin-reader-frame);
+  border-radius: inherit;
+}
+
+/* 拟物皮肤：面板皮革边 */
+[data-skin="skeuo"] .panel--floating {
+  border: 12px solid transparent;
+  border-image: none;
+  background:
+    linear-gradient(var(--bg-elevated), var(--bg-elevated)) padding-box,
+    linear-gradient(145deg, #7c5a30, #55391a 60%, #6d4c26) border-box;
+  box-shadow: 0 18px 44px rgba(30, 20, 8, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* 拟物皮肤：按钮做成浮雕 */
+[data-skin="skeuo"] .btn--solid {
+  background: linear-gradient(180deg,
+      color-mix(in srgb, var(--c-accent) 88%, #fff 12%),
+      color-mix(in srgb, var(--c-accent) 92%, #000 8%));
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--c-accent) 70%, #000 30%),
+              inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+[data-skin="skeuo"] .btn--solid:active {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.28);
+  transform: translateY(1px);
+}
+
+/* 拟物皮肤下的自动生成封面需要更重的书脊阴影（SVG 里已画，这里补偿圆角） */
+[data-skin="skeuo"] .library-card__cover img {
+  border-radius: 4px 8px 8px 4px;
+}
+
+[data-skin="minimal"] .library-card__cover img {
+  border-radius: var(--r-md);
+}

@@ -1,0 +1,43 @@
+{
+  "name": "skylore",
+  "productName": "苍穹",
+  "version": "1.0.0",
+  "description": "苍穹 Skylore —— 本地桌面小说阅读器（TXT / EPUB）",
+  "main": "src/main/main.js",
+  "author": "coder-beizhou",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "smoke": "electron . --smoke-test --dev --no-gpu",
+    "shots": "electron . --shots --dev --no-gpu",
+    "probe": "electron . --probe --dev --no-gpu",
+    "icon": "node build/make-icon.js",
+    "samples": "node test/make-samples.js",
+    "test": "node test/run-all.js",
+    "test:fast": "node test/run-all.js --no-app",
+    "test:parsers": "node test/test-parsers.js",
+    "test:library": "node test/test-library.js",
+    "test:win": "electron test/win-behavior.js --no-gpu",
+    "clean": "node build/clean.js",
+    "build": "node build/make-icon.js && electron-builder --win --x64 && node build/pack.js",
+    "pack": "node build/pack.js",
+    "src-pack": "node build/source-pack.js"
+  },
+  "dependencies": {
+    "iconv-lite": "^0.6.3",
+    "jschardet": "^3.1.4",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@fontsource/liu-jian-mao-cao": "^5.3.0",
+    "@fontsource/zcool-kuaile": "^5.3.0",
+    "@fontsource/zcool-qingke-huangyou": "^5.3.0",
+    "@fontsource/zcool-xiaowei": "^5.3.0",
+    "@fontsource/zhi-mang-xing": "^5.3.0",
+    "electron": "^44.4.3",
+    "electron-builder": "^25.1.8",
+    "lxgw-wenkai-lite-webfont": "^1.7.0"
+  }
+}

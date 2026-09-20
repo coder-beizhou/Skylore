@@ -1,0 +1,15 @@
+苍穹 · Firmament Reader
+本地桌面小说阅读器
+
+本软件完全离线运行：
+  · 不联网、不上传任何数据
+  · 无账号、无广告、无推荐
+  · 你的书籍文件与阅读记录全部保存在本机
+
+内置字体授权：
+  · 马善政毛笔楷书（Ma Shan Zheng）— SIL Open Font License 1.1
+  · 龙藏体（Long Cang）— SIL Open Font License 1.1
+  · 站酷快乐体（ZCOOL KuaiLe）— SIL Open Font License 1.1
+  完整授权文本见安装目录 resources/app.asar 内的 src/renderer/assets/fonts/LICENSE-*.txt
+
+点击"下一步"即表示你已阅读并同意上述说明。

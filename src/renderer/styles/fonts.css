@@ -1,0 +1,66 @@
+/* ==========================================================================
+   苍穹 · 内置字体
+   随应用分发的开源中文字体（全部 SIL Open Font License 1.1），
+   用于补足「本机没装手写体」时的空白 —— 保证任何机器上都能真正用上
+   硬笔手写体，而不是点了没反应或回退到默认字体。
+
+   收录原则：**硬笔（钢笔 / 签字笔）风格**。
+   毛笔体（如马善政毛笔楷书、龙藏行草）笔触过粗、字形夸张，
+   用作正文长时间阅读很累，故不收；只保留真正能拿来读的硬笔体。
+
+   全部使用**单个完整字体文件**（不是 unicode-range 分片）。
+   分片方案（几十条 @font-face + 几十个 woff2）在本项目的 file:// 环境下
+   实测无法生效：FontFace 状态为 loaded，但渲染时仍回退到系统字体。
+   单文件方案稳定可用，这已由冒烟测试的"字体度量差"断言守住。
+
+   格式统一为 woff2（由 fontTools 从 TTF 转换，体积减少约 60%）：
+     霞鹜文楷 11.1MB → 4.4MB ｜ 站酷小薇 6.0MB → 2.5MB
+     站酷庆科黄油 7.9MB → 2.4MB ｜ 志莽行书 1.9MB ｜ 站酷快乐体 0.7MB
+
+   授权文件见 assets/fonts/ 下的 LICENSE-*.txt 与 OFL-lxgw-wenkai.txt
+   ========================================================================== */
+
+/* —— 霞鹜文楷 Lite（LXGW WenKai Lite）：钢笔楷书，最像手写作业本的字 —— */
+@font-face {
+  font-family: "LXGW WenKai Lite";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/lxgw-wenkai-lite.woff2") format("woff2");
+}
+
+/* —— 志莽行书：钢笔行书，连笔流畅，适合正文慢读 —— */
+@font-face {
+  font-family: "Zhi Mang Xing";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/zhi-mang-xing.woff2") format("woff2");
+}
+
+/* —— 站酷小薇：签字笔细楷，笔画纤细有书写感，长文阅读最省眼 —— */
+@font-face {
+  font-family: "ZCOOL XiaoWei";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/zcool-xiaowei.woff2") format("woff2");
+}
+
+/* —— 站酷庆科黄油：圆润的硬笔体，笔画饱满，轻松不严肃 —— */
+@font-face {
+  font-family: "ZCOOL QingKe HuangYou";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/zcool-qingke.woff2") format("woff2");
+}
+
+/* —— 站酷快乐体：圆体，笔画圆润 —— */
+@font-face {
+  font-family: "ZCOOL KuaiLe";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/zcool-kuaile.woff2") format("woff2");
+}
