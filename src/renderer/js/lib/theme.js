@@ -150,9 +150,16 @@ export class ThemeManager {
     if (settings) this.settings = settings;
     const s = this.settings;
 
+    // ⚠ 主题真的变了才 emit。
+    //   设置页切主题走 patch({theme}) → apply()，而 apply 此前不 emit，
+    //   透明浮窗的"字色跟随主题"监听器永远收不到通知 ——
+    //   表现就是"切了夜间，透明框还是黑字"。
+    //   这里以 data-theme 属性为前后对照，只有主题切换才广播。
+    const prevTheme = this.root.getAttribute('data-theme');
     this.root.setAttribute('data-theme', s.theme || 'day');
     this.root.setAttribute('data-skin', s.skin || 'minimal');
     this.root.setAttribute('data-contrast', s.highContrast ? 'high' : 'normal');
+    if (prevTheme !== (s.theme || 'day')) this.emit('theme');
 
     this.applyTypography(s);
     this.applyBackground(s);
@@ -237,7 +244,6 @@ export class ThemeManager {
     if (!dark) this.settings.lastLightTheme = this.settings.theme;
     this.settings.theme = next;
     this.apply();
-    this.emit('theme');
     return next;
   }
 

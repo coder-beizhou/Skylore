@@ -142,6 +142,7 @@ class Store {
     if (!settings || typeof settings !== 'object') return;
     this.healMargins(settings);
     this.healFonts(settings);
+    this.healOverlayInk(settings);
   }
 
   /**
@@ -197,6 +198,24 @@ class Store {
     settings.fontFamily = this.defaults.settings.fontFamily;
     settings.fontFamilyHealed = true;
     settings.fontFamilyHealedFrom = ff;
+  }
+
+  /**
+   * 自愈：把 v1.1.1 遗留的 overlayInk='dark' 迁回 'auto'。
+   *
+   * 场景：v1.1.1 的默认值是 'dark'（强制黑字），当时还没有"跟随主题"这档。
+   *   老用户存档里因此躺着 overlayInk='dark'，升级到 v1.1.2 后它会被当成
+   *   用户的手动覆盖 —— 于是切到夜间主题，透明框仍是黑字，看起来像
+   *   "字色跟随主题"没生效。用户其实从没主动选过黑字。
+   *
+   * 处理：只迁 'dark' → 'auto'（恢复跟随主题）。用户显式选过的 'light'
+   *   不动；迁移动作记 heal 标记，便于排查。
+   */
+  healOverlayInk(settings) {
+    if (settings.overlayInk !== 'dark') return;
+    settings.overlayInk = 'auto';
+    settings.overlayInkHealed = true;
+    settings.overlayInkHealedFrom = 'dark';
   }
 
   save() {
