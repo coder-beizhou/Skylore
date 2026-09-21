@@ -1,5 +1,6 @@
 'use strict';
 
+const path = require('path');
 const { globalShortcut, BrowserWindow, screen } = require('electron');
 
 /**
@@ -29,18 +30,41 @@ const ALTERNATE_TOGGLE = 'Control+Alt+Q';
 /**
  * 常规阅读窗口的最小尺寸。
  *
- * ⚠ 这三个常量必须与 main.js 里创建窗口时的设定保持一致。
+ * ⚠ 这几个常量必须与 main.js 里创建窗口时的设定保持一致。
  *   早期把它们硬编码在两个文件里（900×620），既难改也容易失配，
  *   而 900px 的下限正是"窗口太宽、没法变窄"的直接原因。
+ *
+ * ⚠ 又一次放宽（520 → 380）：
+ *   阅读器的核心用法是「贴边并排」——左边开文档、右边竖一条窄窗读小说。
+ *   380px 下正文每行约 18 个汉字，仍可正常阅读（响应式样式在 680px
+ *   以下会把侧栏压成 48px 图标条、顶栏去掉章节名，不会破版）。
  */
-const MIN_W = 520;
-const MIN_H = 460;
+const MIN_W = 380;
+const MIN_H = 420;
 
-/** 常规窗口的恢复尺寸 */
-const DEFAULT_W = 1180;
-const DEFAULT_H = 800;
+/**
+ * 常规窗口的默认 / 恢复尺寸。
+ *
+ * ⚠ 从 1180×800 改成 900×960（瘦高）。
+ *   1180×800 是横屏比例，在 1440p / 4K 显示器上会显得又矮又胖；
+ *   阅读器实际是**纵向**消费内容（一行行往下读），窗口偏高才合理：
+ *   一屏能容纳更多行，翻页次数更少，也更容易和文档并排摆放。
+ */
+const DEFAULT_W = 900;
+const DEFAULT_H = 960;
 
 class BossMode {
+  /**
+   * 迷你框可缩放范围。
+   *
+   * ⚠ 必须作为静态常量声明在类里，不能在方法内联写字面量 ——
+   *   渲染层拖拽、主进程设置、冒烟测试三处都要用同一个下限，
+   *   各写各的必然失配。曾经因为没有这个常量，Math.max(undefined, 300)
+   *   算出 NaN，窗口被系统钳成 120×120。
+   */
+  static BOX_MIN_W = 160;
+  static BOX_MIN_H = 120;
+
   constructor(ctx) {
     this.ctx = ctx;
     this.active = false;
@@ -54,10 +78,26 @@ class BossMode {
     this.escapeAccel = null;
     this.altToggleOk = false;
     this.restoreOk = false;
+    /** 透明浮窗形态是否启用 */
+    this.overlayActive = false;
+    this.overlayWin = null;
+    /** 浮窗最近一次上报的阅读位置 */
+    this.overlayPos = null;
   }
 
   getWin() {
+    // ⚠ 不能用 BrowserWindow.getAllWindows()[0] —— 透明浮窗也是窗口，
+    //   一旦它先创建，主窗口相关操作（标题、几何、任务栏）都会打到浮窗上。
+    if (this.ctx && typeof this.ctx.getMainWindow === 'function') {
+      const w = this.ctx.getMainWindow();
+      if (w && !w.isDestroyed()) return w;
+    }
     return BrowserWindow.getAllWindows()[0] || null;
+  }
+
+  /** 透明迷你框浮窗（惰性创建，可能为空） */
+  getOverlayWin() {
+    return this.overlayWin && !this.overlayWin.isDestroyed() ? this.overlayWin : null;
   }
 
   getOptions() {
@@ -70,6 +110,11 @@ class BossMode {
       alwaysOnTop: s.bossAlwaysOnTop !== false,
       mute: s.bossMute !== false,
       miniBoxSize: s.miniBoxSize || 300,
+      miniBoxW: s.miniBoxW || s.miniBoxSize || 300,
+      miniBoxH: s.miniBoxH || s.miniBoxSize || 300,
+      overlayBoxW: s.overlayBoxW || 300,
+      overlayBoxH: s.overlayBoxH || 300,
+      overlayInk: s.overlayInk || 'dark',
     };
   }
 
@@ -120,6 +165,7 @@ class BossMode {
   unregisterAll() {
     try { globalShortcut.unregisterAll(); } catch (_) {}
     this.registeredHotkey = null;
+    this.closeOverlay();
   }
 
   getState() {
@@ -135,6 +181,12 @@ class BossMode {
       alternateToggleOk: !!this.altToggleOk,
       escapeExit: this.escapeRegistered,
       escapeAccel: this.escapeAccel || null,
+      overlayActive: !!this.overlayActive,
+      miniBoxW: opts.miniBoxW,
+      miniBoxH: opts.miniBoxH,
+      overlayBoxW: opts.overlayBoxW,
+      overlayBoxH: opts.overlayBoxH,
+      overlayInk: opts.overlayInk,
       /** 至少有一条可用的退出通道 —— 用于界面提示 */
       canExit: this.hotkeyOk || this.escapeRegistered || !!this.altToggleOk || !!this.restoreOk,
     };
@@ -153,7 +205,17 @@ class BossMode {
     if (opts.opacity !== undefined) patch.bossOpacity = opts.opacity;
     if (opts.alwaysOnTop !== undefined) patch.bossAlwaysOnTop = opts.alwaysOnTop;
     if (opts.mute !== undefined) patch.bossMute = opts.mute;
-    if (opts.miniBoxSize !== undefined) patch.miniBoxSize = opts.miniBoxSize;
+    if (opts.miniBoxSize !== undefined) {
+      patch.miniBoxSize = opts.miniBoxSize;
+      // 滑杆语义是「正方形边长」：宽高一起写，避免只改一边
+      patch.miniBoxW = opts.miniBoxSize;
+      patch.miniBoxH = opts.miniBoxSize;
+    }
+    if (opts.miniBoxW !== undefined) patch.miniBoxW = opts.miniBoxW;
+    if (opts.miniBoxH !== undefined) patch.miniBoxH = opts.miniBoxH;
+    if (opts.overlayBoxW !== undefined) patch.overlayBoxW = opts.overlayBoxW;
+    if (opts.overlayBoxH !== undefined) patch.overlayBoxH = opts.overlayBoxH;
+    if (opts.overlayInk !== undefined) patch.overlayInk = opts.overlayInk;
     if (opts.hotkey !== undefined) patch.bossHotkey = opts.hotkey;
     this.ctx.store.patchSettings(patch);
 
@@ -165,13 +227,23 @@ class BossMode {
       this.applyWindowShape(win, this.getOptions());
       this.pushState();
     }
+    // 墨色档位（overlayInk）变了也要让浮窗立刻换字色
+    if (opts.overlayInk !== undefined) this.refreshOverlay();
     return this.getState();
   }
 
   /** 依据 style 调整窗口几何与层级 */
   applyWindowShape(win, opts) {
-    if (opts.style === 'square') {
+    if (opts.style === 'square' || opts.style === 'overlay') {
+      if (opts.style === 'overlay') {
+        // 透明浮窗形态由独立窗口承担，主窗口退到幕后
+        this.setupOverlay(win, opts);
+        return;
+      }
+      // 迷你框尺寸：优先用拖拽后的实际宽高，兼容老的 miniBoxSize
       const size = Math.max(160, Math.min(560, Number(opts.miniBoxSize) || 300));
+      const boxW = Math.max(BossMode.BOX_MIN_W, Number(opts.miniBoxW) || size);
+      const boxH = Math.max(BossMode.BOX_MIN_H, Number(opts.miniBoxH) || size);
       const area = screen.getPrimaryDisplay().workAreaSize;
 
       // ⚠ 顺序至关重要（Windows 实测）：
@@ -192,7 +264,7 @@ class BossMode {
       // 摸鱼场景本就不该最大化，直接关掉最干净。
       this.setMaximizableSafe(win, false);
 
-      const x = Math.max(0, area.width - size - 28);
+      const x = Math.max(0, area.width - boxW - 28);
       const y = 28;
 
       // ⚠ 必须"重试 + 每次校验"，不能一把梭。
@@ -202,14 +274,14 @@ class BossMode {
       //   setResizable(false) 锁死这几种情况下都会失败。
       //   所以这里循环尝试，每轮都读回实际值判断。
       for (let i = 0; i < 4; i++) {
-        try { win.setBounds({ x, y, width: size, height: size }, false); } catch (_) {}
+        try { win.setBounds({ x, y, width: boxW, height: boxH }, false); } catch (_) {}
         let g = win.getBounds();
-        if (Math.abs(g.width - size) <= 4 && Math.abs(g.height - size) <= 4) break;
+        if (Math.abs(g.width - boxW) <= 4 && Math.abs(g.height - boxH) <= 4) break;
 
-        try { win.setSize(size, size, false); } catch (_) {}
+        try { win.setSize(boxW, boxH, false); } catch (_) {}
         try { win.setPosition(x, y, false); } catch (_) {}
         g = win.getBounds();
-        if (Math.abs(g.width - size) <= 4 && Math.abs(g.height - size) <= 4) break;
+        if (Math.abs(g.width - boxW) <= 4 && Math.abs(g.height - boxH) <= 4) break;
 
         // 仍未成功：重置可能锁死尺寸的状态再来一轮
         try { win.setResizable(true); } catch (_) {}
@@ -222,13 +294,13 @@ class BossMode {
       try { win.setMinimumSize(120, 120); } catch (_) {}
 
       const got = win.getBounds();
-      if (Math.abs(got.width - size) > 4 || Math.abs(got.height - size) > 4) {
-        console.warn('[boss] 迷你框尺寸未生效：目标 ' + size + '×' + size
+      if (Math.abs(got.width - boxW) > 4 || Math.abs(got.height - boxH) > 4) {
+        console.warn('[boss] 迷你框尺寸未生效：目标 ' + boxW + '×' + boxH
           + '，实际 ' + got.width + '×' + got.height
           + '，minSize=' + JSON.stringify(win.getMinimumSize())
           + '，visible=' + win.isVisible() + '，maximized=' + win.isMaximized());
       }
-      this.squareTarget = size;
+      this.squareTarget = { w: boxW, h: boxH };
 
       win.setAlwaysOnTop(!!opts.alwaysOnTop, 'screen-saver');
       win.setOpacity(1);
@@ -265,21 +337,191 @@ class BossMode {
     const wait = delay == null ? 300 : delay;
     setTimeout(() => {
       if (!this.active || !this.squareTarget || win.isDestroyed()) return;
-      const size = this.squareTarget;
+      // 兼容两种形态：{ w, h } 对象（拖拽可调）与旧的正方形数字
+      const t = this.squareTarget;
+      const w = typeof t === 'object' ? t.w : t;
+      const h = typeof t === 'object' ? t.h : t;
       const g = win.getBounds();
-      if (Math.abs(g.width - size) <= 4 && Math.abs(g.height - size) <= 4) return;
+      if (Math.abs(g.width - w) <= 4 && Math.abs(g.height - h) <= 4) return;
       if (win.isMaximized()) { try { win.unmaximize(); } catch (_) {} }
       try { win.setResizable(true); } catch (_) {}
       try { win.setMinimumSize(120, 120); } catch (_) {}
-      try { win.setBounds({ x: g.x, y: g.y, width: size, height: size }, false); } catch (_) {}
-      try { win.setSize(size, size, false); } catch (_) {}
+      try { win.setBounds({ x: g.x, y: g.y, width: w, height: h }, false); } catch (_) {}
+      try { win.setSize(w, h, false); } catch (_) {}
       try { win.setResizable(false); } catch (_) {}
       try { win.setMinimumSize(120, 120); } catch (_) {}
       const f = win.getBounds();
-      if (Math.abs(f.width - size) > 4 || Math.abs(f.height - size) > 4) {
-        console.warn('[boss] 显示后补偿仍失败：' + f.width + '×' + f.height + '（目标 ' + size + '）');
+      if (Math.abs(f.width - w) > 4 || Math.abs(f.height - h) > 4) {
+        console.warn('[boss] 显示后补偿仍失败：' + f.width + '×' + f.height + '（目标 ' + w + '×' + h + '）');
       }
     }, wait);
+  }
+
+  /* ============================ 透明迷你框浮窗 ============================ */
+
+  /**
+   * 透明迷你框：用一个**独立的透明无边框置顶窗口**承载小说正文，
+   * 主窗口退到隐藏状态 —— 于是文字直接浮在桌面/其他软件之上，
+   * 而背景完全通透。
+   *
+   * 为什么不用"把主窗口整体变透明"：
+   *   主窗口承载书架、设置、分页与连续滚动引擎，改它的透明属性会
+   *   连带影响窗口阴影、缩放、最大化行为，风险远大于收益；
+   *   独立浮窗对现有功能零影响，且能被单独定位与缩放。
+   */
+  setupOverlay(mainWin, opts) {
+    const area = screen.getPrimaryDisplay().workAreaSize;
+    const w = Math.max(BossMode.BOX_MIN_W, Number(opts.overlayBoxW) || 300);
+    const h = Math.max(BossMode.BOX_MIN_H, Number(opts.overlayBoxH) || 300);
+
+    let ov = this.getOverlayWin();
+    if (!ov) {
+      ov = new BrowserWindow({
+        width: w,
+        height: h,
+        x: Math.max(0, area.width - w - 40),
+        y: 40,
+        frame: false,
+        transparent: true,
+        backgroundColor: '#00000000',
+        hasShadow: false,
+        resizable: true,          // 允许用户拖拽边缘/角落调整（配合渲染层双角把手）
+        movable: true,
+        minimizable: false,
+        maximizable: false,
+        fullscreenable: false,
+        skipTaskbar: true,
+        alwaysOnTop: true,
+        show: false,
+        title: this.fakeTitle(opts.mode),
+        // ⚠ 透明窗口在 Windows 上**不能**与 sandbox 共存时的老问题已在新版本修复，
+        //   这里保持与主窗口一致的 contextIsolation 配置即可。
+        webPreferences: {
+          preload: path.join(__dirname, 'preload.js'),
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: false,
+          spellcheck: false,
+          backgroundThrottling: false,
+          webSecurity: true,
+        },
+      });
+      ov.setMenuBarVisibility(false);
+      ov.loadFile(path.join(__dirname, '..', 'renderer', 'boss-overlay.html'));
+    ov.__loaded = false;
+    ov.webContents.once('did-finish-load', () => { ov.__loaded = true; });
+      ov.on('closed', () => { this.overlayWin = null; });
+      // 浮窗尺寸变化（用户拖边缘 / 双角把手）→ 记回设置
+      ov.on('resize', () => {
+        if (!this.getOverlayWin()) return;
+        const b = ov.getBounds();
+        if (b.width < BossMode.BOX_MIN_W || b.height < BossMode.BOX_MIN_H) return;
+        this.ctx.store.patchSettings({ overlayBoxW: b.width, overlayBoxH: b.height });
+        ov.webContents.send('overlay:geometry', { width: b.width, height: b.height });
+      });
+      /**
+       * ⚠ Electron **没有** BrowserWindow#isTransparent() 这个公开 API
+       *   （诊断代码里曾调用它，直接抛 TypeError 把整个诊断接口打挂）。
+       *   这里在创建时把透明属性记在实例上，供诊断与测试读取。
+       */
+      ov.__isTransparent = true;
+      ov.__skipTaskbar = true;   // 同上：Electron 无 isSkipTaskbar()
+      this.overlayWin = ov;
+    } else {
+      try {
+        ov.setResizable(true);
+        ov.setMinimumSize(BossMode.BOX_MIN_W, BossMode.BOX_MIN_H);
+        ov.setBounds({ x: ov.getBounds().x, y: ov.getBounds().y, width: w, height: h }, false);
+      } catch (_) {}
+    }
+
+    ov.setAlwaysOnTop(!!opts.alwaysOnTop, 'screen-saver');
+    ov.setSkipTaskbar(true);
+    ov.setTitle(this.fakeTitle(opts.mode));
+    try { ov.setOpacity(1); } catch (_) {}
+
+    // 主窗口必须先藏起来，否则透出来的是阅读器自己，"透明"毫无意义
+    if (mainWin && !mainWin.isDestroyed()) {
+      try { mainWin.hide(); } catch (_) {}
+    }
+
+    ov.showInactive();
+    this.overlayActive = true;
+
+    // 把阅读位置推给浮窗，让它从当前位置续读。
+    //
+    // ⚠ 这里是 async 的（要问渲染层要当前章节），但**绝不能 await**：
+    //   toggle() 的结果被 IPC 同步等待，而此刻主窗口刚被 hide()，
+    //   executeJavaScript 可能迟迟不返回 —— 一旦 await，整个「进入摸鱼」
+    //   就卡死在这里（实测探针进程挂住两分钟没动静）。
+    //   所以改成「拿到就推」，不阻塞主流程。
+    const pushSnapshot = () => {
+      if (!this.ctx.getReaderSnapshot) return;
+      Promise.resolve(this.ctx.getReaderSnapshot())
+        .then((snap) => { if (snap) this.pushOverlayContent(snap); })
+        .catch(() => {});
+    };
+    pushSnapshot();
+
+    // 浮窗就绪后补推一次（首次加载时 DOM 还没就绪）
+    ov.webContents.once('did-finish-load', () => {
+      pushSnapshot();
+      try { ov.webContents.send('overlay:geometry', { width: w, height: h }); } catch (_) {}
+    });
+  }
+
+  /**
+   * 把当前阅读位置推给透明浮窗。
+   *
+   * ⚠ 必须先确认拿到的是**可序列化的普通对象**：
+   *   IPC 的 webContents.send 无法序列化 Promise / 函数 ——
+   *   曾经把 getReaderSnapshot() 的返回值（Promise）直接传进来，
+   *   结果每次都抛 'Failed to serialize arguments'，浮窗永远拿不到正文。
+   */
+  pushOverlayContent(snapshot) {
+    const ov = this.getOverlayWin();
+    if (!ov || !snapshot) return;
+    if (typeof snapshot.then === 'function') {
+      // 传进来的是 Promise：自己解包，不要塞给 IPC
+      snapshot.then((v) => this.pushOverlayContent(v)).catch(() => {});
+      return;
+    }
+    this.overlayPos = snapshot;
+    try { ov.webContents.send('overlay:content', snapshot); } catch (err) {
+      console.warn('[boss] 浮窗内容推送失败：', err && err.message);
+    }
+  }
+
+  /**
+   * 重新推送阅读快照给透明浮窗。
+   *
+   * ⚠ 浮窗是独立窗口，字色/正文都靠主进程推 snapshot。主题切换或
+   *   墨色档位变化时若不重推，浮窗会一直停在旧字色 ——
+   *   这正是「透明框字色不跟随主题」的另一半根因。
+   */
+  refreshOverlay() {
+    if (!this.overlayActive || !this.getOverlayWin()) return;
+    if (!this.ctx.getReaderSnapshot) return;
+    Promise.resolve(this.ctx.getReaderSnapshot())
+      .then((snap) => { if (snap) this.pushOverlayContent(snap); })
+      .catch(() => {});
+  }
+
+  /** 关闭透明浮窗 */
+  closeOverlay() {
+    const ov = this.getOverlayWin();
+    this.overlayActive = false;
+    if (!ov) return;
+    try { ov.hide(); } catch (_) {}
+    try { ov.destroy(); } catch (_) {}
+    this.overlayWin = null;
+  }
+
+  /** 浮窗上报的新阅读位置 → 写回主阅读器 */
+  applyOverlayPosition(pos) {
+    if (!pos) return;
+    this.overlayPos = pos;
+    if (this.ctx.applyReaderPosition) this.ctx.applyReaderPosition(pos);
   }
 
   /** 安全地设置可最大化状态（部分平台/Linux 窗口管理器可能不支持） */
@@ -419,11 +661,13 @@ class BossMode {
       //   若沿用「先 setBounds 再 showInactive」的旧顺序，那一轮尺寸调整
       //   会全部落空，用户看到的就是"窗口纹丝不动"。
       //   独立测试已验证：窗口 show 之后同样的 setBounds 立刻生效。
-      win.showInactive();
+      // ⚠ 透明浮窗形态下不能先 showInactive 主窗口：
+      //   主窗口一闪再被隐藏，视觉上就是"闪屏"。
+      if (opts.style !== 'overlay') win.showInactive();
 
       this.applyWindowShape(win, opts);
       // 显示完成后补一次确认（应对仍在过渡态的情况）
-      this.ensureSquareAfterShow(win, 280);
+      if (opts.style !== 'overlay') this.ensureSquareAfterShow(win, 280);
 
       if (opts.mute && !win.webContents.isAudioMuted()) {
         win.webContents.setAudioMuted(true);
@@ -443,6 +687,14 @@ class BossMode {
       this.unregisterEscapeExit();
       // —— 退出摸鱼 ——
       const s = this.saved || {};
+
+      // 透明浮窗形态：销毁浮窗，并把主窗口重新显示出来
+      if (this.overlayActive || this.getOverlayWin()) {
+        this.closeOverlay();
+        if (win && !win.isDestroyed()) {
+          try { win.showInactive(); } catch (_) {}
+        }
+      }
 
       // 先恢复常规窗口约束与能力，再恢复尺寸，否则会被迷你尺寸限制住
       this.setMaximizableSafe(win, true);
@@ -487,6 +739,66 @@ class BossMode {
       height: b.height,
     }, false);
     return true;
+  }
+
+  /**
+   * 设置迷你框尺寸（双角拖拽用）。
+   *
+   * 直接改窗口几何并记忆到设置；不走 applyWindowShape 的"正方形"逻辑，
+   * 否则拖出来的长方形会被立刻弹回正方形。
+   */
+  setBoxSize(w, h, which, anchor) {
+    const W = Math.max(BossMode.BOX_MIN_W, Math.round(Number(w) || 300));
+    const H = Math.max(BossMode.BOX_MIN_H, Math.round(Number(h) || 300));
+    const isOverlay = which === 'overlay';
+
+    const win = isOverlay ? this.getOverlayWin() : this.getWin();
+    if (!win || win.isDestroyed()) return null;
+
+    const b = win.getBounds();
+    try {
+      const area = screen.getPrimaryDisplay().workAreaSize;
+      const nw = Math.min(W, area.width);
+      const nh = Math.min(H, area.height);
+
+      // ⚠ 右下角与左下角的差别只在 x：
+      //   · br（右下角）：左边缘不动 —— 拖右下角，左上角是锚点
+      //   · bl（左下角）：右边缘不动 —— 向左拖，窗口往左长
+      //   两种锚点都必须校验工作区边界，否则窗口会被拖到屏幕外，
+      //   用户既看不见也够不着（只能靠老板键救回来）。
+      const right = b.x + b.width;
+      let nx = b.x;
+      if (anchor === 'bl') nx = right - nw;
+      nx = Math.max(0, Math.min(nx, area.width - nw));
+      const ny = Math.max(0, Math.min(b.y, area.height - nh));
+
+      win.setBounds({ x: nx, y: ny, width: nw, height: nh }, false);
+    } catch (_) {}
+
+    const got = win.getBounds();
+    const patch = isOverlay
+      ? { overlayBoxW: got.width, overlayBoxH: got.height }
+      : { miniBoxW: got.width, miniBoxH: got.height, miniBoxSize: got.width };
+    this.ctx.store.patchSettings(patch);
+    return got;
+  }
+
+  /**
+   * 读取迷你框当前几何（拖拽开始时用来算基准）。
+   *
+   * 一并返回工作区尺寸：缩放时如果碰到屏幕边缘，窗口会被钳住
+   * （见 setBoxSize），调用方需要知道"这次是否被边界限制住了"，
+   * 否则会误判成"锚点算错了"。
+   */
+  getBoxSize(which) {
+    const win = which === 'overlay' ? this.getOverlayWin() : this.getWin();
+    if (!win || win.isDestroyed()) return null;
+    const b = win.getBounds();
+    const area = screen.getPrimaryDisplay().workAreaSize;
+    return {
+      x: b.x, y: b.y, width: b.width, height: b.height,
+      workAreaW: area.width, workAreaH: area.height,
+    };
   }
 
   /** 只预览某个伪装界面（不改变窗口形态），用于设置页预览 */

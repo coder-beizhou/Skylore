@@ -107,6 +107,65 @@
   .empty__title { font-size: var(--fs-lg); }
 }
 
+/* —— 520px 以下：极窄窗（贴边并排阅读）——
+   ⚠ 窗口最小宽度已放宽到 380px。这一档是「左边开文档、右边竖一条窄窗
+     读小说」的场景，重点保证：正文每行仍有 15 字以上、侧栏不抢空间、
+     顶栏不换行挤爆。 */
+@media (max-width: 520px) {
+  /* 侧栏压到最窄：只留 4 个图标位 */
+  .sidebar { width: 44px; padding: var(--sp-2) 2px; }
+  .sidebar .sidebar__item { height: 32px; }
+
+  /* 书库：单列网格，避免出现"半张封面"的尴尬宽度 */
+  .grid { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: var(--sp-3) var(--sp-2); }
+  .content__body { padding: var(--sp-2) var(--sp-2) var(--sp-5); }
+  .content__head { padding: var(--sp-2) var(--sp-2) var(--sp-1); }
+
+  /* 标题栏：品牌与副标题全部让位，只留窗口按钮 */
+  .titlebar__brand,
+  .titlebar__sub,
+  .titlebar__center { display: none; }
+  .win-btn { width: 26px; }
+
+  /* 阅读页：边距变紧，顶栏只留必要按钮 */
+  .reader-topbar { padding: 0 6px; gap: 2px; }
+  .rbtn { width: 26px; height: 26px; }
+  .reader-bottombar { padding: 0 var(--sp-2); gap: var(--sp-1); font-size: var(--fs-xs); }
+  .reader-fabs { right: var(--sp-2); bottom: 50px; }
+
+  /* 阅读设置 / 目录抽屉在极窄窗下铺满，否则正文被压到只剩一条 */
+  .drawer--left { width: 92vw; }
+  .drawer { width: 94vw; }
+
+  /*
+   * ⚠ 最关键的适配：正文左右边距。
+   *
+   *   阅读设置的默认左右边距是 88px（合计 176px）。380px 的窗口里
+   *   扣掉之后只剩约 200px 正文宽 —— 十来个汉字，读起来极其局促。
+   *   这里把边距上限压到窗口宽度的 6%，保证正文始终有足够可用宽度：
+   *   窗口够宽时**完全不影响**用户设置（88px 仍按 88px 走），
+   *   只有很窄时才自动收边距。
+   *
+   *   ⚠ 必须读 --reader-m*-raw（js/lib/theme.js 写入的原始值），
+   *      不能写成 --reader-ml: min(var(--reader-ml), 6vw)：
+   *      自定义属性**自引用**或**循环引用**都会变成
+   *      invalid at computed-value time —— 实测直接算成 0px，
+   *      正文反而贴到窗口边缘。只有「JS 写原始值、CSS 读它收敛」
+   *      这种单向依赖才是安全的。
+   *
+   *   边距同时被分页引擎（Paginator.readMargins 从 CSS 变量读）
+   *   与滚动模式使用，改在这里两边同时生效，不会出现
+   *   「一种模式正常、另一种模式跑偏」。
+   */
+  .reader-paper,
+  .reader-scroll {
+    --reader-ml: min(var(--reader-ml-raw), 6vw);
+    --reader-mr: min(var(--reader-mr-raw), 6vw);
+    --reader-mt: min(var(--reader-mt-raw), 7vh);
+    --reader-mb: min(var(--reader-mb-raw), 7vh);
+  }
+}
+
 /* —— 窗口很矮时：压缩纵向留白 —— */
 @media (max-height: 620px) {
   .content__head { padding-top: var(--sp-3); padding-bottom: var(--sp-2); }

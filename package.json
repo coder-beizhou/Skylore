@@ -1,7 +1,7 @@
 {
   "name": "skylore",
   "productName": "苍穹",
-  "version": "1.0.0",
+  "version": "1.1.2",
   "description": "苍穹 Skylore —— 本地桌面小说阅读器（TXT / EPUB）",
   "main": "src/main/main.js",
   "author": "coder-beizhou",
@@ -21,7 +21,7 @@
     "test:library": "node test/test-library.js",
     "test:win": "electron test/win-behavior.js --no-gpu",
     "clean": "node build/clean.js",
-    "build": "node build/make-icon.js && electron-builder --win --x64 && node build/pack.js",
+    "build": "node build/close-running.js && node build/clean.js && node build/make-icon.js && electron-builder --win --x64 && node build/pack.js",
     "pack": "node build/pack.js",
     "src-pack": "node build/source-pack.js"
   },

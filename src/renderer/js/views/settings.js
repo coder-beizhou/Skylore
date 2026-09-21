@@ -2,6 +2,7 @@ import { $, $$, el, clear, esc, clamp, on, delegate, debounce } from '../lib/dom
 import { icon } from '../lib/icons.js';
 import { toast, call } from '../lib/toast.js';
 import { THEMES, TEXTURES, SKINS } from '../lib/theme.js';
+import { ACTIONS, Keymap, comboFromEvent, prettyCombo } from '../lib/keymap.js';
 
 /**
  * 完整设置页。分七个面板：
@@ -14,6 +15,7 @@ const NAV = [
   { key: 'fonts', label: '字体管理', icon: 'text' },
   { key: 'paging', label: '翻页与自动', icon: 'pages' },
   { key: 'boss', label: '摸鱼模式', icon: 'ghost' },
+  { key: 'keys', label: '快捷键', icon: 'keyboard' },
   { key: 'data', label: '数据与存储', icon: 'folder' },
   { key: 'about', label: '关于苍穹', icon: 'info' },
 ];
@@ -94,6 +96,7 @@ export class SettingsView {
       fonts: () => this.renderFonts(pane),
       paging: () => this.renderPaging(pane),
       boss: () => this.renderBoss(pane),
+      keys: () => this.renderKeys(pane),
       data: () => this.renderData(pane),
       about: () => this.renderAbout(pane),
     };
@@ -614,10 +617,10 @@ export class SettingsView {
     }
 
     // 形态
-    this.segmentRow(pane, '呈现形态', '正方形迷你框最隐蔽，伪装界面更像在工作', 'bossStyle', [
-      { value: 'square', label: '正方形迷你框', icon: 'grid' },
+    this.segmentRow(pane, '呈现形态', '迷你框最隐蔽；透明浮窗直接浮在桌面上；完整伪装窗口更像在工作', 'bossStyle', [
+      { value: 'square', label: '迷你框', icon: 'grid' },
       { value: 'normal', label: '完整伪装窗口', icon: 'layout' },
-      { value: 'ghost', label: '隐身模式', icon: 'eyeOff' },
+      { value: 'overlay', label: '透明浮窗', icon: 'ghost' },
     ], () => this.applyBossOptions());
 
     // 伪装界面选择
@@ -651,10 +654,46 @@ export class SettingsView {
     ]);
     this.row(pane, '迷你框预览', `当前边长 ${size}px · 只有文字，无选项、无边框`, preview);
 
-    this.sliderRow(pane, '迷你框尺寸', '正方形边长', 'miniBoxSize', 180, 520, 10, 'px',
+    this.sliderRow(pane, '迷你框尺寸', '正方形边长（也可以直接在框的左下角/右下角拖拽调整）', 'miniBoxSize', 180, 520, 10, 'px',
       null, () => { this.applyBossOptions(); this.render(); });
 
+    // 双角拖拽后框可能是长方形，给一个「一键恢复正方形」的出口
+    {
+      const curW = Math.round(this.state.settings.miniBoxW || size);
+      const curH = Math.round(this.state.settings.miniBoxH || size);
+      const isRect = curW !== curH;
+      const shapeText = isRect
+        ? ('当前 ' + curW + ' × ' + curH + ' px（已拖成长方形）')
+        : ('当前 ' + curW + ' × ' + curH + ' px（正方形）');
+      const wrap = el('div.flex.items-center.gap-2', { style: { flexWrap: 'wrap' } }, [
+        el('span.text-sm.text-tertiary', { text: shapeText }),
+        (() => {
+          const b = el('button.btn.btn--ghost.btn--sm', { text: '恢复正方形' });
+          b.addEventListener('click', async () => {
+            const edge = Math.round(this.state.settings.miniBoxSize || 300);
+            await call(this.api.boss.setBoxSize(edge, edge, 'mini', 'br'), { silent: true });
+            await this.patch({ miniBoxW: edge, miniBoxH: edge }, { layout: false });
+            this.render();
+            toast('迷你框已恢复为正方形', { duration: 1600 });
+          });
+          return b;
+        })(),
+      ]);
+      this.row(pane, '迷你框实际尺寸', '拖动左下角 / 右下角可自由调整宽高，位置会自动记忆', wrap);
+    }
+
     pane.appendChild(el('div', { style: { height: '20px' } }));
+
+    // 透明浮窗专属设置
+    this.segmentRow(pane, '透明浮窗墨色', '默认跟随主题（日间黑字 / 夜间白字）；桌面壁纸与主题不一致时可手动覆盖',
+      'overlayInk', [
+        { value: 'auto', label: '自动（跟随主题）', icon: 'sparkle' },
+        { value: 'dark', label: '黑字', icon: 'sun' },
+        { value: 'light', label: '白字', icon: 'moon' },
+      ], () => this.applyBossOptions());
+
+    this.sliderRow(pane, '透明浮窗尺寸', '正方形边长（也可以直接在浮窗的左下角/右下角拖拽）',
+      'overlayBoxW', 180, 720, 10, 'px', null, () => { this.applyBossOptions(); this.render(); });
 
     this.switchRow(pane, '窗口置顶', '切换后仍浮在其他窗口之上，便于继续偷看', 'bossAlwaysOnTop',
       () => this.applyBossOptions());
@@ -801,7 +840,139 @@ export class SettingsView {
     document.addEventListener('keydown', onKey, true);
   }
 
-  /* ======================== 6. 数据与存储 ======================== */
+  /* ======================== 6. 快捷键 ======================== */
+
+  /**
+   * 快捷键面板。
+   *
+   * 设计取舍：
+   *   · 只开放「安全可改」的键。Esc 与老板键（主进程 globalShortcut 注册）
+   *     不在列表里 —— 它们承担「退出摸鱼」的兜底职责，改坏了会进得去出不来。
+   *   · 录制时实时做冲突检测：撞键直接拒绝并指出被谁占用，
+   *     而不是先写进去再让用户自己发现按了没反应。
+   */
+  renderKeys(pane) {
+    this.paneHeader(pane, '快捷键', '点「录制」后按下新的组合键即可修改。改动立即生效，无需重启。');
+
+    const km = this.app.keymap;
+    const groups = [
+      { title: '阅读页', desc: '仅在大开本阅读界面生效', scope: 'reader' },
+      { title: '全局', desc: '任何界面都可以使用', scope: 'global' },
+    ];
+
+    groups.forEach((g) => {
+      const list = ACTIONS.filter((a) => a.scope === g.scope);
+      if (!list.length) return;
+
+      const wrap = el('div', { style: { width: '100%' } });
+      list.forEach((a) => {
+        const combo = km ? km.resolve(a.action) : a.def;
+        const custom = km ? km.isCustom(a.action) : false;
+
+        const display = el('div.hotkey-display', { text: prettyCombo(combo) });
+
+        const recBtn = el('button.btn.btn--ghost.btn--sm', { text: '录制' });
+        recBtn.addEventListener('click', () => this.recordKey(display, a, km));
+
+        const resetBtn = el('button.btn.btn--ghost.btn--sm', { text: '默认' });
+        resetBtn.addEventListener('click', async () => {
+          await this.patch(km.patchFor(a.action, ''), { layout: false });
+          toast('已恢复默认：' + prettyCombo(a.def), { duration: 1600 });
+          this.render();
+        });
+
+        const tools = el('div.hotkey-input', {}, [display, recBtn, custom ? resetBtn : null].filter(Boolean));
+        this.row(wrap, a.label, a.desc, tools);
+      });
+
+      pane.appendChild(this.subHeader(g.title, g.desc));
+      pane.appendChild(wrap);
+      pane.appendChild(el('div', { style: { height: '22px' } }));
+    });
+
+    // 恢复全部默认
+    {
+      const b = el('button.btn.btn--ghost', { html: icon('refresh', 15) + '<span>全部恢复默认</span>' });
+      b.addEventListener('click', async () => {
+        await this.patch(Keymap.resetPatch(), { layout: false });
+        toast('全部快捷键已恢复默认', { duration: 1800 });
+        this.render();
+      });
+      pane.appendChild(el('div.flex.gap-2', { style: { flexWrap: 'wrap' } }, [b]));
+    }
+
+    pane.appendChild(el('p.text-sm.text-tertiary', {
+      style: { marginTop: '20px', lineHeight: '1.75' },
+      text: 'Esc（退出摸鱼 / 逐层返回）与老板键由系统级注册，'
+        + '为保证任何情况下都能退出，未开放自定义；老板键可在「摸鱼模式」面板中修改。',
+    }));
+  }
+
+  /** 小组标题（快捷键面板内部用，比 paneHeader 轻） */
+  subHeader(title, desc) {
+    return el('div', { style: { margin: '6px 0 10px' } }, [
+      el('div', { style: { fontSize: '13px', fontWeight: '600', color: 'var(--tx-primary)' }, text: title }),
+      desc ? el('div', { style: { fontSize: '12px', color: 'var(--tx-tertiary)', marginTop: '2px' }, text: desc }) : null,
+    ].filter(Boolean));
+  }
+
+  /**
+   * 录制一个快捷键。
+   *
+   * 与 recordHotkey（老板键）的区别：这里只改渲染层处理的键，
+   * 不涉及主进程 globalShortcut，因此不用等 keyup、也不怕系统占用。
+   */
+  recordKey(display, actionDef, km) {
+    display.classList.add('is-recording');
+    display.textContent = '请按下组合键…';
+
+    const cleanup = () => {
+      document.removeEventListener('keydown', onKey, true);
+      display.classList.remove('is-recording');
+    };
+
+    const onKey = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === 'Escape') {
+        cleanup();
+        display.textContent = prettyCombo(km.resolve(actionDef.action));
+        return;
+      }
+
+      const combo = comboFromEvent(e);
+      if (!combo) return;   // 仅按修饰键时继续等待
+
+      // 无修饰键时只接受 F1–F12：裸字母会与输入、翻页冲突
+      const hasMod = /Ctrl|Alt|Shift|Meta/.test(combo);
+      if (!hasMod && !/^F([1-9]|1[0-2])$/.test(combo)) {
+        display.textContent = '需包含 Ctrl / Alt / Shift';
+        return;
+      }
+
+      // 冲突检测：同一组合键不允许绑两个动作
+      const clash = km.conflictOf(combo, actionDef.action);
+      if (clash) {
+        const back = prettyCombo(km.resolve(actionDef.action));
+        display.textContent = '已被「' + clash.label + '」占用';
+        toast.error('该组合键已用于「' + clash.label + '」，请换一个', { duration: 3200 });
+        setTimeout(() => { cleanup(); display.textContent = back; }, 1200);
+        return;
+      }
+
+      cleanup();
+      display.textContent = prettyCombo(combo);
+      await this.patch(km.patchFor(actionDef.action, combo), { layout: false });
+      toast.success(actionDef.label + ' 已设为 ' + prettyCombo(combo), { duration: 1800 });
+      this.render();
+    };
+
+    document.addEventListener('keydown', onKey, true);
+  }
+
+  /* ======================== 7. 数据与存储 ======================== */
+  /* ======================== 7. 数据与存储 ======================== */
 
   renderData(pane) {
     this.paneHeader(pane, '数据与存储', '苍穹完全离线运行，所有数据都保存在本机，不会上传到任何服务器。');
@@ -966,6 +1137,11 @@ function fmtMb(bytes) {
   return (bytes / 1024 / 1024).toFixed(1);
 }
 
+/** 动作名（用于提示文案） */
+function actionLabel(def) {
+  return def && def.label ? def.label : '快捷键';
+}
+
 /** 伪装模式清单（与 BossView 保持一致） */
 function BossModes() {
   return [
@@ -973,6 +1149,7 @@ function BossModes() {
     { key: 'fake-excel', label: 'Excel 表格', desc: '带行列号与公式栏' },
     { key: 'fake-code', label: 'VS Code', desc: '带语法高亮的编辑器' },
     { key: 'fake-mail', label: 'Outlook 邮件', desc: '三栏邮件客户端' },
-    { key: 'mini-text', label: '纯文字迷你框', desc: '只有一个方框的正文' },
+    { key: 'mini-text', label: '纯文字迷你框', desc: '只有一个方框的正文，双角可拖拽调大小' },
+    { key: 'mini-overlay', label: '透明迷你框', desc: '背景全透明，文字浮在桌面上' },
   ];
 }

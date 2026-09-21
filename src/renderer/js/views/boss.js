@@ -15,12 +15,21 @@ import { toast, call } from '../lib/toast.js';
  */
 
 const FAKE_MODES = [
-  { key: 'fake-word', label: 'Word 文档', desc: '会议纪要为底，最不引人注意' },
-  { key: 'fake-excel', label: 'Excel 表格', desc: '带行列号与公式栏的真实观感' },
-  { key: 'fake-code', label: 'VS Code', desc: '带语法高亮的代码编辑器' },
-  { key: 'fake-mail', label: 'Outlook 邮件', desc: '三栏邮件客户端布局' },
-  { key: 'mini-text', label: '纯文字迷你框', desc: '只有一个正方形的正文，最隐蔽' },
+  { key: 'fake-word', label: 'Word 文档', desc: '会议纪要为底，正文即小说，最不引人注意' },
+  { key: 'fake-excel', label: 'Excel 表格', desc: '数据表 + 备注列，备注列里是小说' },
+  { key: 'fake-code', label: 'VS Code', desc: 'notes.md 里写着正文，带 minimap 与终端面板' },
+  { key: 'fake-mail', label: 'Outlook 邮件', desc: '三栏邮件客户端，邮件正文即小说' },
+  { key: 'mini-text', label: '纯文字迷你框', desc: '只有一个方框的正文，可双角拖拽调大小' },
+  { key: 'mini-overlay', label: '透明迷你框', desc: '背景全透明，文字直接浮在桌面上，可拖拽缩放' },
 ];
+
+/** 伪装界面里承载小说的容器 → 供滚动阅读使用 */
+const FAKE_SCROLL = {
+  'fake-word': { scroll: 'fakeWordScroll', inner: 'fakeWordNovel' },
+  'fake-excel': { scroll: 'fakeExcelScroll', inner: 'fakeExcelText' },
+  'fake-code': { scroll: 'fakeCodeScroll', inner: 'fakeCodeText' },
+  'fake-mail': { scroll: 'fakeMailScroll', inner: 'fakeMailNovel' },
+};
 
 export class BossView {
   constructor({ state, bus, app }) {
@@ -32,6 +41,17 @@ export class BossView {
     this.style = 'square';
     this.mode = 'fake-word';
     this._built = false;
+    /** 伪装界面（Word/Excel/代码/邮件）正在滚动阅读的容器，非激活时为 null */
+    this.fakeScrollEl = null;
+    /** 伪装界面的位置上报节流 */
+    this._fakePosRaf = null;
+    /** 缩放中的标记（抑制误触发翻页点击） */
+    this._resizing = false;
+    /** 本次伪装界面访问是否还「没滚动过」（决定进来时停顶部还是跟随阅读位置） */
+    this._fakeFresh = true;
+    this._lastFakeMode = null;
+    /** 是否正在程序化设置 scrollTop（用于屏蔽由此触发的 scroll 事件） */
+    this._suppressFakeScroll = false;
   }
 
   async init() {
@@ -49,6 +69,21 @@ export class BossView {
     this.bus.on('route', () => {
       if (this.isActive) this.renderMini();
     });
+
+    // 主题切换时透明浮窗的字色要跟着变（日间黑字 / 夜间白字）
+    if (this.app && this.app.theme && this.app.theme.onChange) {
+      this.app.theme.onChange(() => {
+        if (this.isActive && this.style === 'overlay') {
+          this.api.overlay && this.api.overlay.refresh && this.api.overlay.refresh();
+        }
+      });
+    }
+
+    // 主阅读器换章后，伪装界面/迷你框里的内容要跟着换
+    this.bus.on('reader:chapter', () => {
+      if (!this.isActive) return;
+      if (FAKE_SCROLL[this.mode]) this.renderFakeContent(this.mode);
+    });
   }
 
   /* ============================ 预生成伪装内容 ============================ */
@@ -57,16 +92,33 @@ export class BossView {
     if (this._built) return;
     this._built = true;
 
-    this.buildWordDoc();
+    // 外壳部分：这些与「读哪一章」无关，只在启动时构建一次。
+    // 注意抬头（会议信息 / 邮件头）不在这里 —— 它们由 buildFakeHead
+    // 在真正进入某个伪装界面时按需构建，避免开工就白算一遍。
     this.buildExcelSheet();
     this.buildCodeFile();
     this.buildMailBox();
+  }
+
+  /**
+   * 伪装界面的「抬头」——固定不变的部分。
+   *
+   * Word 是一份会议纪要的抬头（时间/地点/参会人 + 几段看起来
+   * 完全正常的正文开头），邮件是发件人/主题/时间。
+   * 真正要读的小说正文由 renderFakeContent 写进正文容器，
+   * 两者拼在一起才像一份完整的文档。
+   */
+  buildFakeHead(mode) {
+    if (mode === 'fake-word') this.buildWordDoc();
+    else if (mode === 'fake-mail') this.buildMailHead();
   }
 
   /** 仿 Word：一份看起来像样的会议纪要 */
   buildWordDoc() {
     const host = $('#fakeWordPage');
     if (!host) return;
+    if (host.dataset.built === '1') return;
+    host.dataset.built = '1';
     const paras = [
       ['会议时间', '2026年9月18日 14:00 - 15:30'],
       ['会议地点', '总部 3 号楼 12 层第二会议室'],
@@ -78,20 +130,17 @@ export class BossView {
       `<p class="doc-no">${esc(k)}：<span style="font-weight:400">${esc(v)}</span></p>`
     ).join('');
 
+    // ⚠ 抬头必须**短**。
+    //
+    //   最初这里铺了一整份会议纪要（四个小节、十几段），结果真实章节正文
+    //   被挤到好几屏之外 —— 用户切进 Word 伪装时满屏都是假会议内容，
+    //   翻半天才见到自己在读的小说。伪装只是外壳，正文才是主角。
+    //   现在只保留会议信息块 + 一小段过渡文字，小说紧随其后。
     host.innerHTML = `
       <h1>第三季度项目推进情况汇报会 会议纪要</h1>
       ${head}
       <p class="doc-no" style="margin-top:20px">一、本季度工作回顾</p>
-      <p>本季度各部门围绕年度经营目标，稳步推进各项重点工作。技术中心完成核心系统重构，接口平均响应时间由 480ms 下降至 132ms，系统稳定性显著提升。市场部在华东、华南两个重点区域完成渠道梳理，新增合作方 14 家。</p>
-      <p>财务数据显示，本季度营业收入较上季度增长 12.4%，毛利率保持在合理区间。成本控制方面，通过供应链优化与集中采购，采购成本同比下降 6.8%。</p>
-      <p class="doc-no">二、存在的问题</p>
-      <p>部分项目节点较原计划滞后，主要原因是需求变更频繁导致返工。跨部门协作流程仍存在信息传递不及时的情况，需要在下一阶段重点改进。</p>
-      <p class="doc-no">三、下一阶段工作安排</p>
-      <p>1. 技术中心牵头，于 10 月中旬前完成新版管理后台的联调测试工作，并同步输出部署方案与回滚预案。</p>
-      <p>2. 市场部继续推进区域渠道建设，重点跟进已签约合作方的落地情况，形成月度跟踪台账。</p>
-      <p>3. 财务部配合完成年度预算的中期复盘，对偏差较大的科目逐项说明原因并提出调整建议。</p>
-      <p class="doc-no">四、会议要求</p>
-      <p>各部门负责人需在本周五下班前，将本部门的细化执行方案报送至项目管理办公室，由办公室汇总后提交总经理审阅。后续将建立双周例会机制，跟踪各项任务的落实情况。</p>
+      <p>本季度各部门围绕年度经营目标稳步推进各项重点工作，核心系统重构已完成，接口平均响应时间由 480ms 下降至 132ms；市场部在华东、华南两个重点区域完成渠道梳理，新增合作方 14 家。本季度营业收入较上季度增长 12.4%，毛利率保持在合理区间。</p>
     `;
   }
 
@@ -197,11 +246,28 @@ export class BossView {
     host.appendChild(frag);
   }
 
+  /** 邮件阅读窗格的抬头（发件人 / 主题 / 时间 + 操作按钮） */
+  buildMailHead() {
+    const host = $('#fakeMailHead');
+    if (!host || host.dataset.built === '1') return;
+    host.dataset.built = '1';
+    host.innerHTML =
+      '<div class="mail-view__subject">关于Q3经营分析报告的数据口径说明</div>'
+      + '<div class="mail-view__from">'
+      + '<span class="mail-view__avatar">张</span>'
+      + '<div class="mail-view__meta"><b>张明</b><span>财务分析岗</span></div>'
+      + '<div class="mail-view__time">今天 09:15</div>'
+      + '</div>'
+      + '<div class="mail-view__actions"><span>↩ 回复</span><span>↪ 转发</span><span>⋯</span></div>';
+  }
+
   /** 仿 Outlook：邮件三栏 */
   buildMailBox() {
     const listHost = $('#fakeMailList');
-    const viewHost = $('#fakeMailView');
-    if (!listHost || !viewHost) return;
+    // ⚠ 只校验列表容器。阅读窗格已改名为 fakeMailScroll（拆出抬头），
+    //   若这里仍按旧 ID fakeMailView 校验，会整段提前 return ——
+    //   表现就是「邮件列表空白、正文也不渲染」，而控制台毫无报错。
+    if (!listHost) return;
 
     const mails = [
       { from: '系统通知中心', subj: '【重要】2026年度绩效考核工作启动通知', pre: '各位同事：根据公司年度工作安排，本年度绩效考核工作将于10月8日正式启动…', time: '09:42' },
@@ -216,25 +282,22 @@ export class BossView {
 
     clear(listHost);
     mails.forEach((m, i) => {
-      const row = el('div.mail-row', { class: i === 1 ? 'is-on' : '' }, [
-        el('div.mail-row__from', { text: m.from }),
+      // 未读用加粗 + 左侧蓝条（与 is-on 的选中态区分开）
+      const cls = [i === 1 ? 'is-on' : '', i < 3 ? 'is-unread' : ''].filter(Boolean).join(' ');
+      const row = el('div.mail-row', { class: cls }, [
+        el('div.mail-row__top', {}, [
+          el('div.mail-row__from', { text: m.from }),
+          el('div.mail-row__time', { text: m.time }),
+        ]),
         el('div.mail-row__subj', { text: m.subj }),
+        el('div.mail-row__pre', { text: m.pre }),
       ]);
       listHost.appendChild(row);
     });
 
-    viewHost.innerHTML = `
-      <h2>关于Q3经营分析报告的数据口径说明</h2>
-      <div class="mail-view__meta">
-        发件人：张明 &nbsp;·&nbsp; 收件人：经营分析组 &nbsp;·&nbsp; 时间：今天 09:15
-      </div>
-      <p>各位：</p>
-      <p>附件中的数据我已经按照财务口径重新核对了一遍，其中线上渠道部分的统计范围有所调整，把退款订单从收入中扣除后再计算，因此与市场部之前提供的数字会有差异。建议统一采用财务口径，避免后续汇报时出现两套数字。</p>
-      <p>另外，同比增幅那一列的计算基数是去年同期数据，需要提醒的是去年同期有一个大额一次性订单，如果剔除这个因素，实际可比增幅大约在 9.6% 左右。这一点在汇报时最好能说明一下，避免引起不必要的追问。</p>
-      <p>成本科目我按采购、物流、人力、推广四类做了归集，其中采购成本下降主要是因为集中采购议价，物流成本的上升与订单量增长基本匹配，属于正常范围。</p>
-      <p>如果口径上有其他意见，请在今天下班前反馈给我，明天上午我会把最终版本提交给总经理办公室。</p>
-      <p style="color:#605e5c">张明<br>财务分析岗<br>2026-09-19</p>
-    `;
+    // ⚠ 这里原本写死了一封完整的假邮件正文 —— 现在正文位置让给小说，
+    //   邮件头由 buildMailHead 单独构建（在阅读窗格顶部）。
+    //   旧代码一并删除，避免「小说与假邮件混在一起」的诡异效果。
   }
 
   /* ============================ 事件 ============================ */
@@ -242,6 +305,7 @@ export class BossView {
   bindEvents() {
     this.bindMiniDrag();
     this.bindMiniTouch();
+    this.bindMiniResize();
     this.bindFakeExit();
     this.bindKeyboardExit();
 
@@ -324,6 +388,86 @@ export class BossView {
     });
   }
 
+  /**
+   * 迷你框双角缩放（左下角 / 右下角）。
+   *
+   * ⚠ 为什么两个角都要有：
+   *   迷你框默认贴在屏幕右上角。只有右下角能缩放时，用户想把框
+   *   往"左"长（远离屏幕边缘）就必须先移动窗口再缩放，很别扭；
+   *   左下角把手让窗口可以直接向左下生长，右上角锚点不动 ——
+   *   贴右侧边缘时这才是自然的操作方向。
+   *
+   * 实现：监听鼠标位移 → 换算成目标宽高 → 交给主进程改窗口尺寸
+   * （主进程负责工作区边界校验，见 main/boss.js#setBoxSize）。
+   */
+  bindMiniResize() {
+    const mini = $('#bossMini');
+    if (!mini) return;
+
+    const grips = [
+      { node: $('#bossMiniGripBL'), anchor: 'bl' },
+      { node: $('#bossMiniGripBR'), anchor: 'br' },
+    ];
+    const sizeEl = $('#bossMiniSize');
+
+    grips.forEach(({ node, anchor }) => {
+      if (!node) return;
+
+      let resizing = false;
+      let startX = 0;
+      let startY = 0;
+      let baseW = 0;
+      let baseH = 0;
+
+      node.addEventListener('mousedown', async (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const r = await call(this.api.boss.getBoxSize('mini'), { silent: true });
+        if (!r) return;
+        resizing = true;
+        this._resizing = true;
+        startX = e.screenX;
+        startY = e.screenY;
+        baseW = r.width;
+        baseH = r.height;
+
+        document.body.classList.add('is-resizing-mini');
+        if (sizeEl) {
+          sizeEl.classList.add('is-on');
+          sizeEl.textContent = baseW + ' × ' + baseH;
+        }
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!resizing) return;
+        const dx = e.screenX - startX;
+        const dy = e.screenY - startY;
+
+        // 左下角：向右拖是变小，dx 取反
+        const wDelta = anchor === 'bl' ? -dx : dx;
+        const w = Math.round(baseW + wDelta);
+        const h = Math.round(baseH + dy);
+
+        if (sizeEl) sizeEl.textContent = w + ' × ' + h;
+        call(this.api.boss.setBoxSize(w, h, 'mini', anchor), { silent: true }).then(() => {
+          this.renderMini();
+        });
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (!resizing) return;
+        resizing = false;
+        document.body.classList.remove('is-resizing-mini');
+        if (sizeEl) sizeEl.classList.remove('is-on');
+        // 缩放刚结束的短时间内抑制翻页点击
+        this._suppressMiniClick = Date.now() + 220;
+        setTimeout(() => { this._resizing = false; }, 120);
+      });
+    });
+  }
+
   /** 迷你框内的点击翻页、滚轮、右键退出 */
   bindMiniTouch() {
     const body = $('#bossMiniBody');
@@ -331,6 +475,9 @@ export class BossView {
 
     body.addEventListener('click', (e) => {
       if (e.target.closest('#bossMiniClose')) return;
+      // 缩放手柄上的点击不算翻页；刚拖完缩放也抑制一下
+      if (e.target.closest('.boss-mini__grip')) return;
+      if (this._resizing) return;
       if (this._suppressMiniClick && Date.now() < this._suppressMiniClick) return;
       const rect = body.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -385,13 +532,55 @@ export class BossView {
       });
     }
 
-    // 窗口若拿到焦点（例如用户点了一下迷你框），Esc 就能直接退出
+    // 键盘：Esc 退出；伪装界面激活时方向键/翻页键/空格同样能翻页
     document.addEventListener('keydown', (e) => {
       if (!this.isActive) return;
+
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
         this.exit();
+        return;
+      }
+
+      // 只在伪装界面形态下接管翻页键（迷你框里没有翻页空间语义）
+      if (!this.fakeScrollEl) return;
+      const tag = (e.target.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return;
+
+      // ⚠ 必须 stopPropagation：reader.js 也在 document 上监听 keydown
+      //   并会执行 nextPage()/prevPage()。伪装激活时若让它继续跑，
+      //   主阅读器的翻页会和伪装容器的滚动互相覆盖 ——
+      //   表现就是「按了翻页键没反应 / 画面乱跳」。
+      //   （reader.js 侧另有 isActive 守卫做双保险。）
+      const HANDLED = ['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft', 'PageDown', 'PageUp', ' '];
+      if (HANDLED.indexOf(e.key) !== -1) e.stopPropagation();
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          this.fakeScrollEl.scrollTop += 90;
+          if (this.fakeAtBottom(this.fakeScrollEl)) this.extendFakeChapter(1);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          this.fakeScrollEl.scrollTop -= 90;
+          if (this.fakeAtTop(this.fakeScrollEl)) this.extendFakeChapter(-1);
+          break;
+        case 'ArrowRight':
+        case 'PageDown':
+        case ' ':
+          e.preventDefault();
+          if (e.shiftKey && e.key === ' ') this.fakePage(-1);
+          else this.fakePage(1);
+          break;
+        case 'ArrowLeft':
+        case 'PageUp':
+          e.preventDefault();
+          this.fakePage(-1);
+          break;
+        default:
+          break;
       }
     }, true);
   }
@@ -416,7 +605,7 @@ export class BossView {
 
     // 先把渲染层的可见性准备好，再让主进程改窗口形态，
     // 这样用户看到的顺序是「内容先就位 → 窗口变成正方形」，不会闪空白
-    const effectiveStyle = mode === 'mini-text' ? 'square' : style;
+    const effectiveStyle = this.effectiveStyle(mode, style);
     await this.applyVisibility(true, mode, effectiveStyle);
 
     const st = await call(this.api.boss.toggle(true), { silent: true });
@@ -428,24 +617,49 @@ export class BossView {
     await this.applyVisibility(false, this.mode, this.style);
     const st = await call(this.api.boss.toggle(false), { silent: true });
     if (st) this.syncFromMain(st);
+    // 透明浮窗形态下主窗口被隐藏，退出后必须确保它回到可见状态
+    await call(this.api.app.show(), { silent: true });
     this.app.reader && this.app.reader.showUI(true);
     toast('已恢复阅读', { duration: 1400 });
   }
 
+  /**
+   * 模式 → 窗口形态。
+   *
+   * 三个方框形态都靠"窗口本身"呈现，其余伪装界面用普通窗口：
+   *   mini-text    → square（不透明迷你框）
+   *   mini-overlay → overlay（透明浮窗）
+   *   其它          → 传入的 style（normal）
+   */
+  effectiveStyle(mode, style) {
+    if (mode === 'mini-text') return 'square';
+    if (mode === 'mini-overlay') return 'overlay';
+    return style || 'normal';
+  }
+
   /** 依据形态与模式设置可见性 */
   async applyVisibility(on, mode, style) {
-    document.body.classList.remove('is-boss-square', 'is-boss-ghost', 'is-boss-normal');
+    document.body.classList.remove('is-boss-square', 'is-boss-ghost', 'is-boss-normal', 'is-boss-overlay');
     $$('.fake').forEach((f) => f.classList.remove('is-on'));
     $('#bossMini').classList.add('is-hidden');
 
     if (!on) {
       document.body.removeAttribute('data-fake-active');
       document.body.classList.add('is-boss-off');
+      this.fakeScrollEl = null;
+      // 清掉「上次进入的形态」记号：下次进入任何伪装界面都从顶部开始，
+      // 保证用户每次切进来都能先看到完整的外壳。
+      this._lastFakeMode = null;
       return;
     }
     document.body.classList.remove('is-boss-off');
 
-    if (mode === 'mini-text' || style === 'square') {
+    if (style === 'overlay') {
+      // 透明迷你框由独立浮窗承载：主界面整体隐藏，
+      // 但保留"内容容器"的渲染（浮窗靠 IPC 拿快照，不读这里的 DOM）
+      document.body.classList.add('is-boss-overlay');
+      document.body.setAttribute('data-fake-active', 'true');
+    } else if (mode === 'mini-text' || style === 'square') {
       document.body.classList.add('is-boss-square');
       $('#bossMini').classList.remove('is-hidden');
       this.renderMini();
@@ -462,6 +676,9 @@ export class BossView {
         $('#bossMini').classList.remove('is-hidden');
         this.renderMini();
       }
+      // 把小说正文嵌进伪装界面，并绑定滚动阅读
+      if (FAKE_SCROLL[mode]) this.renderFakeContent(mode);
+      if (mode === 'fake-code') this.renderMinimap();
       document.body.setAttribute('data-fake-active', 'true');
     }
     await nextFrame();
@@ -477,14 +694,332 @@ export class BossView {
     this.hotkeyError = st.hotkeyError || '';
 
     if (this.isActive) {
-      const effectiveStyle = this.mode === 'mini-text' ? 'square' : this.style;
-      this.applyVisibility(true, this.mode, effectiveStyle);
+      this.applyVisibility(true, this.mode, this.effectiveStyle(this.mode, this.style));
     } else {
       this.applyVisibility(false, this.mode, this.style);
     }
 
     const btn = $('#rbtnBoss');
     if (btn) btn.classList.toggle('is-on', this.isActive);
+  }
+
+  /* ============================ 伪装界面正文 ============================ */
+
+  /**
+   * 把小说正文渲染进伪装界面。
+   *
+   * 设计要点：
+   *   · 每个伪装界面只用一个**滚动容器**（Word 的纸张、Excel 的备注列、
+   *     代码编辑器、邮件阅读窗格），容器本身保留伪装界面原有的外观，
+   *     所以看起来完全是在读一份文档/一列备注/一个 md 文件/一封邮件。
+   *   · 位置与主阅读器双向同步：渲染时读 reader 的 (章号, 章内比例)，
+   *     滚动时把新位置写回 reader 并落盘 —— 退出后无缝接续。
+   */
+  /**
+   * @param {string} [modeArg] 伪装界面 key。
+   *
+   * ⚠ 必须接受显式 mode 参数，不能只读 this.mode：
+   *   applyVisibility(true, mode, style) 的语义是「按传入的 mode 显示界面」，
+   *   而 this.mode 可能还停留在上一次的形态（例如刚从迷你框切到 Excel）。
+   *   只读 this.mode 会导致「界面切了、正文没切」—— 伪装界面一片空白。
+   */
+  renderFakeContent(modeArg) {
+    const mode = modeArg || this.mode;
+    const conf = FAKE_SCROLL[mode];
+    if (!conf) return;
+
+    this.buildFakeHead(mode);
+
+    const scrollEl = $('#' + conf.scroll);
+    const innerEl = $('#' + conf.inner);
+    if (!scrollEl || !innerEl) return;
+
+    const reader = this.app.reader;
+    if (!reader || !reader.chapter) {
+      innerEl.innerHTML = '<p>还没有打开任何书籍。</p>';
+      return;
+    }
+
+    // 记录当前滚动容器，供滚轮/位置同步使用
+    this.fakeScrollEl = scrollEl;
+
+    const paras = this.extractParagraphs(reader.chapter.html);
+    const totalChars = paras.reduce((a, p) => a + p.length, 0) || 1;
+    const ratio = Math.max(0, Math.min(1, reader.ratio || 0));
+
+    // 为让「章内比例 → 滚动位置」可逆，这里渲染**整章**，
+    // 再按比例定位 scrollTop。伪装界面是宽屏，整章通常也就几屏高，
+    // 比按容量切片更自然（也避免了切片导致的段落重排）。
+    //
+    // ⚠ 定位时要**扣掉抬头高度**：抬头（会议信息 / 邮件头 / 注释头）
+    //   也在这个滚动容器里，直接用 innerEl 的高度算比例会让位置整体偏后，
+    //   切进来的瞬间就把抬头滚没了 —— 看起来不像一份完整文档。
+    innerEl.innerHTML = paras.map((p) => '<p>' + esc(p) + '</p>').join('\n');
+
+    const headEl = scrollEl.querySelector('.fake-page__head, .mail-view__head, .sheet-note__head, .code-area__head');
+    const headH = headEl ? headEl.offsetHeight : 0;
+
+    // ⚠ 首次进入某个伪装界面时，**停在顶部**，让完整外壳（邮件头 /
+    //   文档标题 / 文件注释）先被看到 —— 这是「像一份完整文件」的关键。
+    //   若一进来就按阅读比例跳到中段，邮件头会被滚出视野，
+    //   整个窗口就只剩一屏正文，伪装立刻失效。
+    //
+    // ⚠ 「首次」必须是**一次访问**的属性，不能是单次渲染的属性：
+    //   enter() 会让 applyVisibility 跑两次（第二次来自 syncFromMain 状态回推），
+    //   若按「本次渲染是不是第一次」判断，第二次渲染就会按阅读比例
+    //   跳到中段 —— 邮件头照样被滚没。所以这里用一个在整次访问期间
+    //   保持为真的标记 _fakeFresh，直到用户真的滚动过才置为 false。
+    if (this._lastFakeMode !== mode) {
+      this._lastFakeMode = mode;
+      this._fakeFresh = true;
+    }
+
+    // 布局落定后再定位
+    requestAnimationFrame(() => {
+      const max = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
+      // 抬头以下才是正文；比例只作用在正文段上，再整体后移 headH
+      const bodyMax = Math.max(0, max - headH);
+      // ⚠ 设置 scrollTop 会触发 scroll 事件！若不屏蔽，滚动回调会立刻把
+      //   _fakeFresh 清掉，并把「程序设的位置」当成用户滚动回写进阅读器，
+      //   于是第二次渲染又跳到中段 —— 「进来先看完整外壳」的设计被自己抹掉。
+      this._suppressFakeScroll = true;
+      scrollEl.scrollTop = this._fakeFresh ? 0 : Math.round(headH + ratio * bodyMax);
+      // 等事件派发完再解除屏蔽
+      requestAnimationFrame(() => { this._suppressFakeScroll = false; });
+      this.renderFakeStatus();
+      if (mode === 'fake-code') this.renderMinimap();
+    });
+
+    this.bindFakeScroll(scrollEl);
+  }
+
+  /** 伪装界面里的滚动 → 换算成章内比例并写回阅读器（跨章自动拼接） */
+  bindFakeScroll(scrollEl) {
+    if (scrollEl._bossBound) return;
+    scrollEl._bossBound = true;
+
+    let tick = null;
+    scrollEl.addEventListener('scroll', () => {
+      if (!this.isActive) return;
+      if (tick) return;
+      tick = requestAnimationFrame(() => {
+        tick = null;
+        if (!this.isActive) return;
+        // 程序化定位（渲染时设置 scrollTop）不参与：既不算用户滚动，
+        // 也不回写阅读位置 —— 否则会把刚设好的位置立刻改掉。
+        if (this._suppressFakeScroll) return;
+
+        // 用户真的滚动过 → 本次访问不再是「首次」，后续重渲染跟随阅读位置
+        this._fakeFresh = false;
+
+        const reader = this.app.reader;
+        if (!reader || !reader.chapter) return;
+
+        const max = Math.max(1, scrollEl.scrollHeight - scrollEl.clientHeight);
+        // 与渲染时对称：扣掉抬头高度，保证「滚到哪 → 存哪」可逆，
+        // 否则每次进出伪装界面阅读位置都会往前漂一段。
+        const headEl = scrollEl.querySelector('.fake-page__head, .mail-view__head, .sheet-note__head, .code-area__head');
+        const headH = headEl ? headEl.offsetHeight : 0;
+        const bodyMax = Math.max(1, max - headH);
+        const ratio = Math.max(0, Math.min(1, (scrollEl.scrollTop - headH) / bodyMax));
+        reader.ratio = ratio;
+
+        // 与阅读引擎同步：分页模式同步页码，滚动模式同步像素位置
+        if (this.state.settings.pageMode === 'scroll') reader.scroller.setRatio(ratio, false);
+        else reader.paginator.setRatio(ratio);
+
+        reader.updateProgressUI();
+        reader.scheduleSave();
+        this.renderFakeStatus();
+      });
+    }, { passive: true });
+
+    // 滚轮：贴边时自动接续下一章 / 上一章（跨章连续阅读）
+    scrollEl.addEventListener('wheel', (e) => {
+      if (!this.isActive) return;
+      const raw = Number(e.deltaY) || 0;
+      if (!raw) return;
+      if (raw > 0 && this.fakeAtBottom(scrollEl)) this.extendFakeChapter(1);
+      else if (raw < 0 && this.fakeAtTop(scrollEl)) this.extendFakeChapter(-1);
+    }, { passive: true });
+
+    // ⚠ 伪装界面同样要能「翻页」，不能只有滚轮。
+    //   用户的阅读习惯是在页面上点两侧翻页/用键盘，若伪装界面里点了没反应，
+    //   就会以为这个形态是「只读的摆设」。
+    //
+    //   ⚠ 监听必须挂在 .fake **根节点**而不是滚动容器上：
+    //     滚动容器只覆盖正文区（Excel 里更是只有右侧备注列），
+    //     点窗口其它空白处（Word 的灰色页边、Excel 的数据表区）就没反应 ——
+    //     这正是用户反馈「没法正常翻页」的直接原因之一。
+    //     挂根节点后按**窗口宽度**的左右各 26% 判定，整窗皆可点。
+    //
+    //   中间区域不响应，以免误触；伪装外壳上的交互元素与翻页按钮一律排除。
+    const root = scrollEl.closest('.fake');
+    if (root && !root._fakeClickBound) {
+      root._fakeClickBound = true;
+      root.addEventListener('click', (e) => {
+        if (!this.isActive) return;
+        if (e.target.closest('a, button, [data-no-fake-page], .fake__tab, .sheet-tab, .mail-row, .ribbon-tab, .explorer__item, .win-bar, .fake__chrome, .fake__toolbar, .ribbon-tabs, .statusbar, .sheet-tabs, .formula-bar, .panel, .minimap, .mail-side, .mail-list, .activity-bar, .explorer')) return;
+        const rect = root.getBoundingClientRect();
+        const fx = (e.clientX - rect.left) / Math.max(1, rect.width);
+        if (fx < 0.26) this.fakePage(-1);
+        else if (fx > 0.74) this.fakePage(1);
+      });
+    }
+
+    // 右下角的可见翻页控件（可发现性）
+    this.ensureFakeNav(root);
+  }
+
+  /**
+   * 每个伪装界面右下角的一对「上一章 / 下一章」小按钮 + 章节指示。
+   *
+   * ⚠ 为什么要有：整窗点击与键盘都是"隐藏交互"，第一次用的人根本不知道
+   *   伪装界面里能翻页。一对贴合各伪装风格的小按钮把能力暴露出来，
+   *   同时不破坏伪装观感（半透明、悬停才完全显现）。
+   */
+  ensureFakeNav(root) {
+    if (!root) return;
+    if (root.querySelector('.fake-nav')) return;
+    const nav = document.createElement('div');
+    nav.className = 'fake-nav';
+    nav.setAttribute('data-no-fake-page', '1');
+    nav.innerHTML =
+      '<button class="fake-nav__btn" data-fake-nav="prev" title="上一章">‹</button>'
+      + '<span class="fake-nav__label"></span>'
+      + '<button class="fake-nav__btn" data-fake-nav="next" title="下一章">›</button>';
+    nav.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-fake-nav]');
+      if (!b) return;
+      e.stopPropagation();
+      const dir = b.getAttribute('data-fake-nav') === 'prev' ? -1 : 1;
+      this.fakeStepChapter(dir);
+    });
+    root.appendChild(nav);
+  }
+
+  /** 翻页按钮：到边缘才换章，否则翻一屏（与 fakePage 语义一致但显式换章优先） */
+  fakeStepChapter(dir) {
+    const el = this.fakeScrollEl;
+    if (!el) return;
+    if (dir > 0 && this.fakeAtBottom(el)) { this.extendFakeChapter(1); return; }
+    if (dir < 0 && this.fakeAtTop(el)) { this.extendFakeChapter(-1); return; }
+    this.fakePage(dir);
+  }
+
+  /** 伪装界面是否已滚到底 / 顶（用于跨章接续的边界判定） */
+  fakeAtBottom(scrollEl) {
+    const el = scrollEl || this.fakeScrollEl;
+    if (!el) return false;
+    return el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+  }
+
+  fakeAtTop(scrollEl) {
+    const el = scrollEl || this.fakeScrollEl;
+    if (!el) return false;
+    return el.scrollTop <= 1;
+  }
+
+  /**
+   * 伪装界面翻一屏。
+   *
+   * 与主阅读器一致地「按视口高度推进 86%」，而不是一次跳一整章 ——
+   * 后者在长章节里会直接丢掉大半内容。到边缘时自动接续相邻章。
+   */
+  fakePage(dir) {
+    const el = this.fakeScrollEl;
+    if (!el) return;
+    const step = el.clientHeight * 0.86;
+    const max = Math.max(0, el.scrollHeight - el.clientHeight);
+    const next = Math.max(0, Math.min(max, el.scrollTop + dir * step));
+
+    // 已经在边缘还要继续翻 → 跨章
+    if (dir > 0 && this.fakeAtBottom(el) && next >= max - 1) { this.extendFakeChapter(1); return; }
+    if (dir < 0 && this.fakeAtTop(el) && next <= 1) { this.extendFakeChapter(-1); return; }
+
+    el.scrollTo({ top: next, behavior: 'smooth' });
+  }
+
+  /** 伪装界面滚到章末/章首时切换章节，并自动接续滚动 */
+  async extendFakeChapter(dir) {
+    const reader = this.app.reader;
+    if (!reader || !reader.toc || !reader.toc.length) return;
+    const next = reader.chapterIndex + dir;
+    if (next < 0 || next >= reader.toc.length) return;
+
+    // 允许并发前先打个标记，避免连续滚轮触发多次切换
+    if (this._fakeSwitchLock) return;
+    this._fakeSwitchLock = true;
+    try {
+      await reader.gotoChapter(next, dir > 0 ? 0 : 1);
+      // 换章后重新渲染（定位到目标章首/章末）
+      this.renderFakeContent(this.mode);
+      // 章首时顶到最上；章末时滚到最下
+      const conf = FAKE_SCROLL[this.mode];
+      const scrollEl = conf ? $('#' + conf.scroll) : null;
+      if (scrollEl) {
+        requestAnimationFrame(() => {
+          const max = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
+          scrollEl.scrollTop = dir > 0 ? 0 : max;
+        });
+      }
+    } finally {
+      setTimeout(() => { this._fakeSwitchLock = false; }, 260);
+    }
+  }
+
+  /**
+   * VS Code 的 minimap（右侧缩略图）。
+   *
+   * ⚠ 这是 VS Code 最具辨识度的特征之一 —— 空着的 minimap 一眼假。
+   *   这里按正文行数生成一批等宽短横线，长短随机（模拟代码行的
+   *   参差长度），并在中间留一小段高亮表示当前视口位置。
+   */
+  renderMinimap() {
+    const host = $('#fakeCodeMinimap');
+    if (!host) return;
+    const textEl = $('#fakeCodeText');
+    const lines = textEl ? Math.max(20, Math.round(textEl.scrollHeight / 22)) : 60;
+    const count = Math.min(140, lines);
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      // 长度在 30%~100% 之间摆动，看起来像长短不一的代码行
+      const w = 30 + Math.round(Math.abs(Math.sin(i * 1.7)) * 70);
+      const cls = (i > count * 0.35 && i < count * 0.45) ? ' class="is-view"' : '';
+      out.push('<i' + cls + ' style="width:' + w + '%"></i>');
+    }
+    host.innerHTML = out.join('');
+  }
+
+  /** 伪装界面的状态栏文字（页码/字数），让"在工作"的假象更完整 */
+  renderFakeStatus() {
+    const reader = this.app.reader;
+    if (!reader || !reader.chapter) return;
+    const ch = (reader.chapterIndex || 0) + 1;
+    const total = reader.toc ? reader.toc.length : 1;
+    const chars = this.extractParagraphs(reader.chapter.html).reduce((a, p) => a + p.length, 0);
+
+    const wordStatus = $('#fakeWordStatus');
+    if (wordStatus) {
+      // ⚠ 文案修正：这里显示的是**章**序号，不是页序号。
+      //   旧文案「第 n 页，共 N 页」把章号当页号，读者会以为整本书只有 N 页。
+      wordStatus.textContent = '第 ' + ch + ' / ' + total + ' 章';
+    }
+    const wordChars = $('#fakeWordChars');
+    if (wordChars) wordChars.textContent = chars.toLocaleString('en-US') + ' 个字';
+
+    const excelStatus = $('#fakeExcelStatus');
+    if (excelStatus) excelStatus.textContent = '第 ' + ch + ' / ' + total + ' 章 · 共 ' + chars + ' 字';
+
+    // Excel 备注列表头：跟随当前章节（让"备注"看起来真的在记当前内容）
+    const excelHead = $('#fakeExcelHead');
+    if (excelHead && reader.chapter) {
+      excelHead.textContent = '备注说明（正文）· ' + (reader.chapter.title || ('第 ' + ch + ' 章'));
+    }
+
+    // 右下角翻页控件的章节指示
+    const navLabel = document.querySelector('.fake.is-on .fake-nav__label');
+    if (navLabel) navLabel.textContent = ch + ' / ' + total + ' 章';
   }
 
   /* ============================ 迷你框内容 ============================ */
@@ -504,17 +1039,41 @@ export class BossView {
       .filter(Boolean);
   }
 
-  /** 计算迷你框一行能放多少字、总共能放几行 */
+  /**
+   * 计算迷你框一行能放多少字、总共能放几行。
+   *
+   * ⚠ 尺寸必须从**真实 DOM** 读，不能再用 settings.miniBoxSize：
+   *   双角拖拽后窗口可以是任意宽高（比如 420×260），
+   *   若仍按正方形推算，拉宽时会算少行数（内容填不满）、
+   *   拉高时会算多行数（末行被裁掉）。
+   */
   miniCapacity() {
-    const boxW = this.state.settings.miniBoxSize || 300;
-    // 与 .boss-mini__text 的字号保持同步（0.9 倍正文），否则容量算不准，
-    // 会出现「填不满一屏」或「溢出被裁掉」两种情况
+    const host = $('#bossMiniBody');
+    const textEl = $('#bossMiniText');
+
+    // 与 .boss-mini__text 的字号保持同步（0.9 倍正文）
     const fontPx = (this.state.settings.fontSize || 19) * 0.9;
     const lineH = fontPx * 1.72;
 
-    const usableW = boxW - 40;   // 左右 padding 20*2
-    const usableH = boxW - 42;   // 上下 padding 22+20
-    const charsPerLine = Math.max(6, Math.floor(usableW / fontPx));
+    let usableW;
+    let usableH;
+    if (host && host.clientWidth > 0 && host.clientHeight > 0) {
+      const cs = getComputedStyle(host);
+      const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      usableW = host.clientWidth - padX;
+      usableH = host.clientHeight - padY;
+    } else {
+      // 兜底（DOM 尚未布局时）：按设置的宽高估算
+      const boxW = this.state.settings.miniBoxW || this.state.settings.miniBoxSize || 300;
+      const boxH = this.state.settings.miniBoxH || this.state.settings.miniBoxSize || 300;
+      usableW = boxW - 40;
+      usableH = boxH - 42;
+    }
+    // 文字缩进会占掉首行两个字，这里不减，让容量略微保守（宁可少填）
+    const textW = textEl && textEl.clientWidth > 0 ? textEl.clientWidth : usableW;
+
+    const charsPerLine = Math.max(6, Math.floor(textW / fontPx));
     const lines = Math.max(3, Math.floor(usableH / lineH));
     // lineH 一并返回：滚轮要按"行"步进，必须知道一行多高
     return { charsPerLine, lines, lineH, capacity: charsPerLine * lines };

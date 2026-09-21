@@ -14,7 +14,7 @@ function registerIpc(ctx) {
   const handle = (channel, fn) => {
     ipcMain.handle(channel, async (_event, ...args) => {
       try {
-        const data = await fn(...args);
+        const data = await fn(...args, _event);
         return { ok: true, data };
       } catch (err) {
         const message = err && err.message ? err.message : String(err);
@@ -24,7 +24,21 @@ function registerIpc(ctx) {
     });
   };
 
-  const getWin = () => BrowserWindow.getAllWindows()[0] || null;
+  const getWin = () => {
+    // 主窗口优先：透明浮窗也是 BrowserWindow，不能靠"第一个"来猜主窗口
+    if (ctx.getMainWindow) {
+      const w = ctx.getMainWindow();
+      if (w) return w;
+    }
+    return BrowserWindow.getAllWindows()[0] || null;
+  };
+  /**
+   * 事件来源窗口。
+   *
+   * ⚠ 浮窗自己发起的窗口操作（拖动/缩放）必须作用于**它自己**，
+   *   否则会去改主窗口 —— 表现就是"拖透明框，主窗口在后台乱跑"。
+   */
+  const senderWin = (event) => BrowserWindow.fromWebContents(event.sender) || null;
 
   // ——— 应用与窗口 ———
   handle('app:info', () => ({
@@ -42,6 +56,21 @@ function registerIpc(ctx) {
   handle('app:open-devtools', () => {
     const w = getWin();
     if (w) w.webContents.toggleDevTools();
+    return true;
+  });
+
+  /**
+   * 重新显示主窗口。
+   *
+   * ⚠ 透明迷你框形态会把主窗口 hide() 掉（否则"透"出来的是阅读器自己），
+   *   退出时必须显式 show —— 否则用户点了退出，窗口却再也不出现。
+   */
+  handle('app:show', () => {
+    const w = getWin();
+    if (w && !w.isDestroyed()) {
+      if (w.isMinimized()) w.restore();
+      w.showInactive();
+    }
     return true;
   });
 
@@ -75,12 +104,25 @@ function registerIpc(ctx) {
     return val;
   });
 
-  /** 迷你框自定义拖拽：按鼠标位移移动窗口（替代 CSS 拖拽区） */
-  handle('win:move-by', (dx, dy) => {
-    const w = getWin();
-    if (!w) return false;
+  /**
+   * 窗口自定义拖拽（替代 -webkit-app-region: drag）。
+   *
+   * ⚠ 必须按「发起事件的窗口」移动：
+   *   主界面的顶栏拖动 → 主窗口；透明浮窗的拖动 → 浮窗自己。
+   *   若一律用 getWin()（主窗口），拖浮窗时动的会是主窗口。
+   */
+  handle('win:move-by', (dx, dy, event) => {
+    const w = senderWin(event) || getWin();
+    if (!w || w.isDestroyed()) return false;
     if (w.isMaximized() || w.isFullScreen()) return false;
-    return ctx.boss.moveBy(dx, dy);
+    const b = w.getBounds();
+    w.setBounds({
+      x: Math.round(b.x + (Number(dx) || 0)),
+      y: Math.round(b.y + (Number(dy) || 0)),
+      width: b.width,
+      height: b.height,
+    }, false);
+    return true;
   });
 
   /** 当前窗口几何 + 最小尺寸限制（窄窗适配与测试用） */
@@ -95,8 +137,12 @@ function registerIpc(ctx) {
     const w = getWin();
     if (!w || w.isMaximized()) return false;
     const b = w.getBounds();
-    const nw = Math.max(420, Math.round(Number(width) || b.width));
-    const nh = Math.max(400, Math.round(Number(height) || b.height));
+    // ⚠ 下限必须与窗口的 minWidth/minHeight 一致（MIN_W/MIN_H）。
+    //   这里曾硬编码 420/400 —— 比窗口实际允许的最小值还大，
+    //   于是"通过 IPC 把窗口设到 380px 宽"会被这道硬编码悄悄顶回 420，
+    //   表现为"明明放开了最小宽度，还是窄不下去"。
+    const nw = Math.max(MIN_W, Math.round(Number(width) || b.width));
+    const nh = Math.max(MIN_H, Math.round(Number(height) || b.height));
     w.setBounds({ x: b.x, y: b.y, width: nw, height: nh }, false);
     return w.getBounds();
   });
@@ -291,6 +337,55 @@ function registerIpc(ctx) {
 
   // ——— 摸鱼模式 ———
   handle('boss:toggle', (on) => boss.toggle(on));
+
+  /**
+   * 迷你框尺寸：双角拖拽时反复调用（渲染层按鼠标位移换算宽高）。
+   * which: 'mini'（普通迷你框）| 'overlay'（透明浮窗）
+   * anchor: 'br'（右下角，左上角为锚点）| 'bl'（左下角，右上角为锚点）
+   */
+  handle('boss:set-box-size', (w, h, which, anchor) => boss.setBoxSize(w, h, which, anchor));
+  handle('boss:get-box-size', (which) => boss.getBoxSize(which));
+
+  /** 透明浮窗的诊断信息（冒烟测试用：确认窗口真的透明、且主窗口已隐藏） */
+  handle('boss:overlay-diagnostics', async () => {
+    const ov = boss.getOverlayWin();
+    const main = ctx.getMainWindow ? ctx.getMainWindow() : getWin();
+    // ⚠ 每条都单独 try：Electron 的窗口 API 在不同版本间有增删
+    //   （isTransparent / isSkipTaskbar 在 44 里就不存在），
+    //   一个 API 缺失不该让整个诊断接口抛错 —— 那会让测试只能看到
+    //   「no data」，反而掩盖了真正的问题。
+    const safe = (fn, fallback) => { try { return fn(); } catch (_) { return fallback; } };
+    // 异步探针：读浮窗 DOM（返回 Promise），单独 await
+    const safeAsync = async (fn, fallback) => {
+      try { return await fn(); } catch (_) { return fallback; }
+    };
+    return {
+      exists: !!ov,
+      visible: ov ? safe(() => ov.isVisible(), false) : false,
+      // 透明与任务栏状态读创建时记录的标记（见 boss.js#setupOverlay）
+      transparent: ov ? ov.__isTransparent === true : false,
+      alwaysOnTop: ov ? safe(() => ov.isAlwaysOnTop(), false) : false,
+      skipTaskbar: ov ? ov.__skipTaskbar === true : false,
+      bounds: ov ? safe(() => ov.getBounds(), null) : null,
+      mainHidden: main ? !safe(() => main.isVisible(), true) : false,
+      active: !!boss.overlayActive,
+      // 浮窗当前字色档位（白字=true）。冒烟测试用它验证「字色跟随主题」。
+      inkLight: ov ? await safeAsync(() => ov.webContents.executeJavaScript(
+        'document.body.classList.contains("ink-light")'), false) : false,
+    };
+  });
+
+  /** 透明浮窗上报阅读位置 → 写回主阅读器 */
+  handle('overlay:position', (pos) => { boss.applyOverlayPosition(pos); return true; });
+  /** 透明浮窗请求退出 */
+  handle('overlay:exit', () => { boss.toggle(false); return true; });
+  /** 主题/墨色变化时让浮窗重新取快照（字色跟随） */
+  handle('overlay:refresh', () => { boss.refreshOverlay(); return true; });
+  /** 浮窗需要的当前内容（首次加载 / 章节切换时） */
+  handle('overlay:snapshot', async () => {
+    const snap = ctx.getReaderSnapshot ? await ctx.getReaderSnapshot() : null;
+    return snap;
+  });
   handle('boss:state', () => boss.getState());
   handle('boss:set-hotkey', (accel) => boss.setHotkey(accel));
   handle('boss:apply', (opts) => boss.applyOptions(opts));

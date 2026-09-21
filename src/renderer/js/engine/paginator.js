@@ -53,17 +53,60 @@ export class Paginator {
    *   阅读参数统一由 --reader-mt/mb/ml/mr 下发（见 lib/theme.js）。
    */
   readMargins() {
-    const cs = getComputedStyle(this.paper || this.columns);
-    const varOf = (name, fallback) => {
+    const el = this.paper || this.columns;
+    const cs = getComputedStyle(el);
+
+    /**
+     * 读一个边距变量，返回**像素数值**。
+     *
+     * ⚠ 不能用 parseFloat 直接读！
+     *   窄窗适配会把变量写成 min(88px, 6vw) 这类**函数表达式**
+     *   （见 styles/responsive.css）。parseFloat('min(88px, 6vw)')
+     *   会得到 NaN，函数随即回落到硬编码的默认值 88 ——
+     *   于是"极窄窗自动收边距"完全失效，正文仍被 88px 顶掉两侧。
+     *
+     *   这里的做法：
+     *     1. 先用 parseFloat 处理纯数值（最常见的情形，零开销）
+     *     2. 解析失败时，用 ResizeObserver 无关的**探针元素**实测：
+     *        临时把一个隐藏元素设成该表达式，读回它计算后的像素值
+     */
+    const probe = (name, fallback) => {
       const raw = cs.getPropertyValue(name).trim();
-      const n = parseFloat(raw);
-      return Number.isFinite(n) ? n : fallback;
+      if (!raw) return fallback;
+
+      // 纯数值（如 "88px" / "88"）—— 直接返回，避免多余 DOM 操作
+      if (/^-?[\d.]+(px)?$/i.test(raw)) {
+        const direct = parseFloat(raw);
+        if (Number.isFinite(direct)) return direct;
+      }
+
+      /**
+       * 函数表达式（min / max / clamp / calc / vw …）
+       *
+       * ⚠ 探针必须挂在**同一个元素上**（el），不能挂到 body：
+       *   vw 是相对视口的，但容器可能是被 flex/sidebar 挤压后的宽度，
+       *   挂在 body 上量出来的值未必等于正文容器实际用的值。
+       *   这里直接把表达式临时写到 el 的 padding 上量一次，
+       *   量完立刻还原 —— el 正是后续真正读边距的那个元素。
+       */
+      try {
+        const prev = el.style.getPropertyValue('padding-left');
+        el.style.setProperty('padding-left', raw, '');
+        const px = parseFloat(getComputedStyle(el).paddingLeft);
+        // 还原（写空字符串会移除该内联属性）
+        if (prev) el.style.setProperty('padding-left', prev, '');
+        else el.style.removeProperty('padding-left');
+        return Number.isFinite(px) ? px : fallback;
+      } catch (_) {
+        return fallback;
+      }
     };
+
     return {
-      top: varOf('--reader-mt', 64),
-      bottom: varOf('--reader-mb', 64),
-      left: varOf('--reader-ml', 88),
-      right: varOf('--reader-mr', 88),
+      top: probe('--reader-mt', 64),
+      bottom: probe('--reader-mb', 64),
+      left: probe('--reader-ml', 88),
+      right: probe('--reader-mr', 88),
     };
   }
 

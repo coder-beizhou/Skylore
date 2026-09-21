@@ -60,6 +60,15 @@ class Store {
         bossAlwaysOnTop: true,
         bossMute: true,
         miniBoxSize: 300,
+        // 迷你框实际宽高（双角拖拽调整后写入；miniBoxSize 是"正方形边长"滑杆专用）
+        miniBoxW: 300,
+        miniBoxH: 300,
+        // 透明浮窗迷你框
+        overlayBoxW: 320,
+        overlayBoxH: 320,
+        overlayInk: 'auto',   // auto=跟随主题；dark=强制黑字；light=强制白字
+        /** 快捷键自定义：{ action: ['Ctrl+K', ...] }，为空表示用内置默认 */
+        keybindings: {},
 
         bookSort: 'recent',
         bookGroup: 'all',

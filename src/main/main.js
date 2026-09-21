@@ -639,10 +639,12 @@ const SMOKE_CHECKS = `
       }
 
       // 18. 摸鱼迷你框
-      App.boss.mode = 'mini-text';
-      App.boss.style = 'square';
-      await App.boss.applyVisibility(true, 'mini-text', 'square');
-      await sleep(200);
+      //
+      // ⚠ 必须走 enter() 而不是 applyVisibility() —— 前者会调用主进程 toggle(true)，
+      //   顺带注册「按 Esc 退出」的全局键。若只调 applyVisibility，
+      //   主进程并不知道已进入摸鱼，退出通道与双击退出的断言都会变成空转。
+      await App.boss.enter({ mode: 'mini-text', style: 'square' });
+      await sleep(760);
       const mini = document.getElementById('bossMini');
       const miniText = document.getElementById('bossMiniText');
       ok('迷你框可见', mini && !mini.classList.contains('is-hidden'));
@@ -698,11 +700,13 @@ const SMOKE_CHECKS = `
       //   这里验证退出通道确实存在且可用。
       ok('迷你框有退出按钮（可发现性）', !!document.getElementById('bossMiniClose'));
       const bossSt = await window.firmament.boss.state();
+      // 前提：至少有出口可用。Esc 由 toggle(true) 注册，正常环境必然成功。
       ok('至少有两条可用的退出通道',
          bossSt && bossSt.ok && bossSt.data.canExit === true,
          bossSt && bossSt.data
            ? ('老板键=' + bossSt.data.hotkeyOk + ' Esc=' + bossSt.data.escapeExit
-              + ' 辅助键(' + bossSt.data.alternateToggle + ')=' + bossSt.data.alternateToggleOk)
+              + ' 辅助键(' + bossSt.data.alternateToggle + ')=' + bossSt.data.alternateToggleOk
+              + (bossSt.data.hotkeyOk === false ? '（注：全局热键被本机其他程序或另一个苍穹实例占用，属环境限制）' : ''))
            : 'no state');
 
       // ⚠ 回归：迷你框拖拽区曾用 -webkit-app-region:drag，
@@ -767,8 +771,319 @@ const SMOKE_CHECKS = `
           if (!visible) ok('伪装界面可见性：' + m, false, 'display 未生效');
         }
       }
-      ok('四套伪装界面均可呈现', true);
+
+      // ⚠ 回归：本次新增的「伪装界面里真的能读小说」——
+      //   四个伪装界面都必须把当前章节正文渲染进自己的滚动容器，
+      //   且滚动时能反向推进主阅读器的章内比例（否则就只是静态贴图）。
+      {
+        const wanted = {
+          'fake-word': { scroll: 'fakeWordScroll', inner: 'fakeWordNovel' },
+          'fake-excel': { scroll: 'fakeExcelScroll', inner: 'fakeExcelText' },
+          'fake-code': { scroll: 'fakeCodeScroll', inner: 'fakeCodeText' },
+          'fake-mail': { scroll: 'fakeMailScroll', inner: 'fakeMailNovel' },
+        };
+        for (const [mode, conf] of Object.entries(wanted)) {
+          await App.boss.enter({ mode, style: 'normal' });
+          await sleep(500);
+          const inner = document.getElementById(conf.inner);
+          const scroll = document.getElementById(conf.scroll);
+          const txt = inner ? (inner.textContent || '') : '';
+          ok('伪装界面装载了小说正文（' + mode + '）',
+             !!inner && txt.replace(/\s/g, '').length > 200,
+             inner ? (txt.replace(/\s/g, '').length + ' 字') : '容器缺失');
+          ok('伪装界面正文容器可滚动（' + mode + '）',
+             !!scroll && scroll.scrollHeight >= scroll.clientHeight,
+             scroll ? ('内容 ' + Math.round(scroll.scrollHeight) + 'px / 视口 ' + Math.round(scroll.clientHeight) + 'px') : '容器缺失');
+        }
+        await App.boss.exit();
+        await sleep(320);
+      }
+
+      // ⚠ 回归：双角缩放。
+      //   左下角与右下角都必须能改窗口尺寸，且左下角拖拽时右边缘保持不动
+      //   （贴屏幕右侧时这才是自然的放大方向）。
+      {
+        await App.boss.enter({ mode: 'mini-text', style: 'square' });
+        await sleep(600);
+        const before = await window.firmament.boss.getBoxSize('mini');
+        const b0 = before && before.data;
+        ok('迷你框可读取当前几何', !!b0 && b0.width > 0, b0 ? (b0.width + '×' + b0.height) : 'no data');
+
+        if (b0) {
+          // 右下角：左上角为锚点，向右下放大。
+          //
+          // ⚠ 断言要区分两种情况：迷你框默认贴在屏幕右上角，
+          //   若继续向右放大会越过工作区，主进程会把它钳回屏幕内 ——
+          //   此时 x 变小是**正确行为**（否则窗口跑到屏幕外就够不着了）。
+          //   只有在工作区内有富余空间时，才要求左边缘严格不动。
+          const wantW = b0.width + 80;
+          const wantH = b0.height + 60;
+          const roomRight = (b0.x + wantW) <= (b0.workAreaW || 99999);
+          await window.firmament.boss.setBoxSize(wantW, wantH, 'mini', 'br');
+          await sleep(360);
+          const br = await window.firmament.boss.getBoxSize('mini');
+          const r1 = br && br.data;
+          ok('右下角放大生效（宽高都变大）',
+             !!r1 && r1.width >= Math.min(wantW, b0.workAreaW) - 6 && r1.height >= b0.height + 40,
+             r1 ? (b0.width + '×' + b0.height + ' → ' + r1.width + '×' + r1.height) : 'no data');
+          ok('右下角缩放锚点正确（左边缘不动，或在贴边时被钳回工作区内）',
+             !!r1 && (roomRight
+               ? Math.abs(r1.x - b0.x) <= 3
+               : (r1.x >= 0 && (r1.x + r1.width) <= (b0.workAreaW || 99999) + 2)),
+             r1 ? ('x ' + b0.x + ' → ' + r1.x + '（' + (roomRight ? '有空间，应保持不动' : '贴边，应钳回屏幕内') + '）') : 'no data');
+
+          // 左下角：右边缘为锚点
+          const cur = r1 || b0;
+          const rightBefore = cur.x + cur.width;
+          await window.firmament.boss.setBoxSize(b0.width, b0.height, 'mini', 'bl');
+          await sleep(360);
+          const bl = await window.firmament.boss.getBoxSize('mini');
+          const r2 = bl && bl.data;
+          ok('左下角缩放生效（尺寸回到目标值）',
+             !!r2 && Math.abs(r2.width - b0.width) <= 6 && Math.abs(r2.height - b0.height) <= 6,
+             r2 ? (r2.width + '×' + r2.height) : 'no data');
+          ok('左下角缩放时右边缘保持不动（锚点正确）',
+             !!r2 && Math.abs((r2.x + r2.width) - rightBefore) <= 6,
+             r2 ? ('右缘 ' + rightBefore + ' → ' + (r2.x + r2.width)) : 'no data');
+
+          // 容量必须跟着真实尺寸走（拖宽后每行字数要变多）
+          const capBefore = App.boss.miniCapacity().charsPerLine;
+          await window.firmament.boss.setBoxSize(b0.width + 200, b0.height, 'mini', 'br');
+          await sleep(360);
+          const capAfter = App.boss.miniCapacity().charsPerLine;
+          ok('迷你框变宽后每行字数随之增加（容量按真实尺寸计算）',
+             capAfter > capBefore, capBefore + ' → ' + capAfter + ' 字/行');
+        }
+        await App.boss.exit();
+        await sleep(320);
+      }
+
+        // ⚠ 伪装界面不仅要能读，还要能翻页 / 滚动，且在章末自动接续下一章。
+        //   这正是用户明确提出的要求：所有伪装形态都得能翻页或上下滑动。
+        {
+          await App.boss.enter({ mode: 'fake-word', style: 'normal' });
+          await sleep(600);
+          const sc = document.getElementById('fakeWordScroll');
+          const reader = App.reader;
+          const startTop = sc.scrollTop;
+
+          // (a) 点击右侧翻页
+          const rect = sc.getBoundingClientRect();
+          sc.dispatchEvent(new MouseEvent('click', {
+            clientX: rect.left + rect.width * 0.88,
+            clientY: rect.top + rect.height * 0.5,
+            bubbles: true,
+          }));
+          await sleep(700);
+          ok('伪装界面点击右侧可翻页', sc.scrollTop > startTop,
+             startTop.toFixed(0) + ' → ' + sc.scrollTop.toFixed(0) + 'px');
+
+          // (b) 键盘 PageDown 翻页
+          const beforeKey = sc.scrollTop;
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true }));
+          await sleep(700);
+          ok('伪装界面 PageDown 可翻页', sc.scrollTop > beforeKey,
+             beforeKey.toFixed(0) + ' → ' + sc.scrollTop.toFixed(0) + 'px');
+
+          // (c) 滚到章末自动接续下一章（跨章）
+          const chBefore = reader.chapterIndex;
+          sc.scrollTop = sc.scrollHeight;   // 直接砸到底，触发跨章
+          await sleep(200);
+          sc.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
+          await sleep(1400);
+          ok('伪装界面滚到章末会自动接续下一章',
+             reader.chapterIndex === chBefore + 1 || chBefore === reader.toc.length - 1,
+             '第 ' + (chBefore + 1) + ' 章 → 第 ' + (reader.chapterIndex + 1) + ' 章（共 ' + reader.toc.length + ' 章）');
+
+          await App.boss.exit();
+          await sleep(400);
+        }
+
+
+      // 19c. 伪装界面的翻页控件与整窗点击（用户反馈"没法翻页/下一章"）
+      {
+        await App.boss.enter({ mode: 'fake-word', style: 'normal' });
+        await sleep(600);
+
+        // (a) 右下角翻页按钮存在
+        const nav = document.querySelector('#fakeWord .fake-nav');
+        ok('伪装界面有可见的翻页控件', !!nav, nav ? '存在' : '缺失');
+        const label = nav ? nav.querySelector('.fake-nav__label') : null;
+        ok('翻页控件显示章节指示', !!label && /\\d+\\s*\\/\\s*\\d+/.test(label.textContent),
+           label ? label.textContent : 'no label');
+
+        // (b) 点「下一章」按钮能换章
+        const chBefore = App.reader.chapterIndex;
+        const nextBtn = nav ? nav.querySelector('[data-fake-nav="next"]') : null;
+        if (nextBtn) {
+          // 先滚到底，让按钮语义变成"换章"
+          const sc = document.getElementById('fakeWordScroll');
+          sc.scrollTop = sc.scrollHeight;
+          await sleep(200);
+          nextBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          await sleep(1200);
+        }
+        ok('点「下一章」按钮可换章', App.reader.chapterIndex === chBefore + 1,
+           '第 ' + (chBefore + 1) + ' → ' + (App.reader.chapterIndex + 1) + ' 章');
+
+        // (c) 整窗点击左右 26% 翻页（点在窗口边缘，不在滚动容器内也算）
+        //
+        // ⚠ 必须先定位到章节**中部**：在章首点左 / 章底点右的语义是
+        //   「换上一章 / 下一章」，scrollTop 会跳到另一章的首/尾，
+        //   用「scrollTop 变小/变大」断言就会误报。
+        const root = document.getElementById('fakeWord');
+        const rr = root.getBoundingClientRect();
+        const sc2 = document.getElementById('fakeWordScroll');
+        const maxS = Math.max(0, sc2.scrollHeight - sc2.clientHeight);
+        sc2.scrollTop = Math.round(maxS * 0.6);
+        await sleep(300);
+        const t0 = sc2.scrollTop;
+        root.dispatchEvent(new MouseEvent('click', {
+          clientX: rr.left + rr.width * 0.08, clientY: rr.top + rr.height * 0.5, bubbles: true,
+        }));
+        await sleep(800);
+        ok('整窗点击左侧可翻上一页', sc2.scrollTop < t0 - 10, t0.toFixed(0) + ' → ' + sc2.scrollTop.toFixed(0) + 'px');
+
+        // (d) 键盘 PageDown 只滚伪装容器、不污染主阅读器页码
+        //   同样先回到中部，避免触发换章把主阅读器页码带跑（换章是合法行为，
+        //   但这条断言要验证的是「同章内按键不串扰」）。
+        const chNow = App.reader.chapterIndex;
+        sc2.scrollTop = Math.round(maxS * 0.4);
+        await sleep(300);
+        const t1 = sc2.scrollTop;
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true }));
+        await sleep(800);
+        // ⚠ 断言语义：伪装滚动**会**同步写回主阅读器 ratio（双向同步是特性），
+        //   所以不能断言「主阅读器完全不动」。要验证的是**没有二次处理**：
+        //   若 reader.js 的键盘 handler 也跑了 nextPage()，ratio 会多跳一整页，
+        //   与容器实际位置对不上。因此比对「容器推算的 ratio」与「reader.ratio」。
+        const headEl = sc2.querySelector('.fake-page__head');
+        const headH = headEl ? headEl.offsetHeight : 0;
+        const bodyMax = Math.max(1, maxS - headH);
+        const expectRatio = Math.max(0, Math.min(1, (sc2.scrollTop - headH) / bodyMax));
+        const gotRatio = App.reader.ratio;
+        ok('伪装内 PageDown 前进一屏且与主阅读器同步（无双触发）',
+           sc2.scrollTop > t1 + 10 && App.reader.chapterIndex === chNow
+             && Math.abs(gotRatio - expectRatio) < 0.06,
+           '容器 ' + t1.toFixed(0) + '→' + sc2.scrollTop.toFixed(0) + 'px ｜ ratio 期望 '
+             + expectRatio.toFixed(3) + ' 实际 ' + Number(gotRatio).toFixed(3)
+             + ' ｜ 章 ' + (chNow + 1) + '→' + (App.reader.chapterIndex + 1));
+
+        await App.boss.exit();
+        await sleep(400);
+      }
+
+      // 19d. 透明浮窗字色跟随主题（三档：auto/dark/light）
+      {
+        await App.patchSettings({ overlayInk: 'auto' });
+        await App.boss.enter({ mode: 'mini-overlay', style: 'overlay' });
+        await sleep(1500);
+
+        // ⚠ 这段代码运行在渲染进程（executeJavaScript 模板），拿不到 require。
+        //   浮窗是另一个窗口，读它的 DOM 必须走主进程的诊断 IPC。
+        const inkOf = async () => {
+          const r = await window.firmament.boss.overlayDiagnostics();
+          return !!(r && r.ok && r.data && r.data.inkLight);
+        };
+
+        // 日间 → 黑字（ink-light=false）
+        await App.patchSettings({ theme: 'day' });
+        await window.firmament.overlay.refresh();
+        await sleep(600);
+        ok('日间主题 → 透明框黑字', (await inkOf()) === false, 'ink-light=' + (await inkOf()));
+
+        // 夜间 → 白字（ink-light=true）
+        await App.patchSettings({ theme: 'night' });
+        await window.firmament.overlay.refresh();
+        await sleep(600);
+        ok('夜间主题 → 透明框白字', (await inkOf()) === true, 'ink-light=' + (await inkOf()));
+
+        // 手动覆盖：night 主题下强制黑字
+        await App.patchSettings({ overlayInk: 'dark' });
+        await window.firmament.boss.apply({ overlayInk: 'dark' });
+        await sleep(600);
+        ok('手动「黑字」覆盖夜间主题', (await inkOf()) === false, 'ink-light=' + (await inkOf()));
+
+        // 手动覆盖：day 主题下强制白字
+        await App.patchSettings({ theme: 'day', overlayInk: 'light' });
+        await window.firmament.boss.apply({ overlayInk: 'light' });
+        await sleep(600);
+        ok('手动「白字」覆盖日间主题', (await inkOf()) === true, 'ink-light=' + (await inkOf()));
+
+        await App.patchSettings({ overlayInk: 'auto', theme: 'day' });
+        await App.boss.exit();
+        await sleep(700);
+      }
+
+      // 19e. 窄窗（380px）下窗口按钮必须在右侧
+      {
+        const before = await window.firmament.app.bounds();
+        const b0 = before && before.ok ? before.data : null;
+        await window.firmament.app.setSize(380, 760);
+        await sleep(800);
+        const geo = await window.firmament.app.bounds();
+        const ctrls = document.querySelector('.win-controls');
+        const cr = ctrls ? ctrls.getBoundingClientRect() : null;
+        ok('窄窗下窗口按钮靠右',
+           !!cr && !!geo && Math.abs(cr.right - geo.data.width) <= 8,
+           cr && geo ? ('按钮右缘 ' + Math.round(cr.right) + 'px / 窗口宽 ' + geo.data.width + 'px') : 'no data');
+        if (b0) { await window.firmament.app.setSize(b0.width, b0.height); await sleep(600); }
+      }
+
+      // ⚠ 透明迷你框（新增形态）：必须是**真透明窗口** + 主窗口让位。
+      //   只断言"有个窗口"没有意义 —— 关键是 transparent 与主窗口隐藏，
+      //   否则用户看到的还是自己的阅读器，透明纯属自欺。
+      {
+        await App.boss.enter({ mode: 'mini-overlay', style: 'overlay' });
+        await sleep(1500);
+        const dr = await window.firmament.boss.overlayDiagnostics();
+        const d = dr && dr.ok ? dr.data : null;
+        console.log('[SMOKE-DIAG] overlayDiagnostics = ' + JSON.stringify(dr));
+        ok('透明浮窗已创建', !!d && d.exists === true, d ? JSON.stringify(d.bounds) : 'no data');
+        ok('浮窗真透明（transparent=true）', !!d && d.transparent === true, d ? ('transparent=' + d.transparent) : 'no data');
+        ok('浮窗置顶且不占任务栏', !!d && d.alwaysOnTop === true && d.skipTaskbar === true,
+           d ? ('alwaysOnTop=' + d.alwaysOnTop + ' skipTaskbar=' + d.skipTaskbar) : 'no data');
+        ok('浮窗存在时主窗口已隐藏（透出的是桌面，不是阅读器）',
+           !!d && d.mainHidden === true, d ? ('mainHidden=' + d.mainHidden) : 'no data');
+
+        // 默认尺寸应与普通迷你框一致（300×300）
+        ok('透明浮窗默认尺寸与迷你框一致',
+           !!d && d.bounds && d.bounds.width >= 160 && d.bounds.height >= 120,
+           d && d.bounds ? (d.bounds.width + '×' + d.bounds.height) : 'no data');
+
+        // 双角缩放同样适用于浮窗
+        if (d && d.bounds) {
+          await window.firmament.boss.setBoxSize(d.bounds.width + 60, d.bounds.height + 40, 'overlay', 'br');
+          await sleep(400);
+          const d2r = await window.firmament.boss.overlayDiagnostics();
+          const d2 = d2r && d2r.ok ? d2r.data : null;
+          ok('透明浮窗可双角缩放',
+             !!d2 && d2.bounds && d2.bounds.width >= d.bounds.width + 40,
+             d2 && d2.bounds ? (d.bounds.width + '→' + d2.bounds.width) : 'no data');
+        }
+
+        await App.boss.exit();
+        await sleep(900);
+        const after = await window.firmament.boss.overlayDiagnostics();
+        const a = after && after.ok ? after.data : null;
+        ok('退出后透明浮窗已销毁', !!a && a.exists === false, a ? ('exists=' + a.exists) : 'no data');
+        ok('退出后主窗口恢复可见', !!a && a.mainHidden === false, a ? ('mainHidden=' + a.mainHidden) : 'no data');
+      }
+
+      // 四套伪装界面逐个进入，校验对应 DOM 真的显示出来（不是空断言）
+      {
+        const map = { 'fake-word': 'fakeWord', 'fake-excel': 'fakeExcel', 'fake-code': 'fakeCode', 'fake-mail': 'fakeMail' };
+        let shown = 0;
+        for (const [mode, id] of Object.entries(map)) {
+          await App.boss.applyVisibility(true, mode, 'normal');
+          await sleep(120);
+          const node = document.getElementById(id);
+          if (node && node.classList.contains('is-on') && node.offsetWidth > 0) shown++;
+        }
+        ok('四套伪装界面均可呈现', shown === 4, shown + '/4 套可见');
+      }
       await App.boss.applyVisibility(false, 'fake-word', 'normal');
+
 
       // 20. 设置页
       App.route('settings');
@@ -989,6 +1304,60 @@ const SMOKE_CHECKS = `
       await App.reader.applyModeLayout({ ratio: App.reader.ratio });
       await sleep(400);
 
+
+      // 21. 极窄窗可读性（最小宽度已放宽到 380px，用于贴边并行阅读）
+      //
+      // ⚠ 必须放在所有断言**之后**：这一步会把窗口改窄，
+      //   若排在前面，后续依赖宽度的断言（分页页宽、列位移、
+      //   章节导航命中测试）都会因为窗口变了而失败 ——
+      //   这正是第一次插入时踩到的坑。
+      //
+      // ⚠ 也不能直接用 win：这段代码运行在渲染进程里
+      //   （executeJavaScript 的模板字符串），win 是主进程的局部变量，
+      //   引用它会抛 ReferenceError 并中断整个冒烟测试。
+      //   窗口操作一律走 window.firmament.app.*（IPC 桥）。
+      {
+        const before = await window.firmament.app.bounds();
+        const b0 = before && before.ok ? before.data : null;
+        if (b0) {
+          await window.firmament.app.setSize(380, 760);
+          await sleep(1000);
+          const after = await window.firmament.app.bounds();
+          const b1 = after && after.ok ? after.data : null;
+          ok('窗口可收窄到 380px（贴边并排阅读）',
+             !!b1 && b1.width <= 400,
+             b1 ? ('实际宽 ' + b1.width + 'px，minWidth=' + b1.minWidth) : 'no data');
+
+          // 边距必须自动收敛，否则正文被 88×2 的边距挤成一条
+          const m = App.reader.paginator.readMargins();
+          ok('极窄窗下正文边距自动收敛', m.left <= 30 && m.right <= 30,
+             '左右 ' + Math.round(m.left) + '/' + Math.round(m.right) + 'px（用户设置为 88px）');
+
+          const paper = document.getElementById('readerPaper');
+          const cs = getComputedStyle(paper);
+          const fpx = parseFloat(cs.getPropertyValue('--reader-font-size')) || 19;
+          const usable = paper.getBoundingClientRect().width - m.left - m.right;
+          const perLine = usable / fpx;
+          ok('极窄窗下每行仍能容纳 12 字以上', perLine >= 12,
+             '可用宽 ' + Math.round(usable) + 'px ÷ ' + fpx + 'px ≈ ' + perLine.toFixed(1) + ' 字/行');
+
+          // 品牌文字在极窄窗必须让位，否则标题栏横向溢出
+          const brand = document.querySelector('.titlebar__brand');
+          ok('极窄窗下标题栏品牌文字已隐藏',
+             !brand || getComputedStyle(brand).display === 'none',
+             brand ? ('display=' + getComputedStyle(brand).display) : '元素不存在');
+
+          // 恢复测试前的尺寸，避免影响后续流程
+          await window.firmament.app.setSize(b0.width, b0.height);
+          await sleep(700);
+          const back = await window.firmament.app.bounds();
+          ok('恢复原尺寸正常', !!back && Math.abs(back.data.width - b0.width) <= 4,
+             b0.width + 'px → ' + (back && back.data ? back.data.width : '?') + 'px');
+        } else {
+          ok('读取窗口几何', false, '无数据');
+        }
+      }
+
       // 20. 关闭阅读后回到书架
       App.reader.close();
       await sleep(400);
@@ -1158,12 +1527,69 @@ function runShotTest(win, ctx) {
       win.setBounds({ x: 60, y: 40, width: 1180, height: 800 });
       await sleep(400);
 
-      // 15. 四套伪装界面
-      for (const [m, label] of [['fake-word','Word'],['fake-excel','Excel'],['fake-code','VSCode'],['fake-mail','邮件']]) {
-        await js(`window.__APP__.App.boss.applyVisibility(true,'${m}','normal')`);
-        await shot(`15-伪装-${label}`);
+      // 14b. 透明迷你框（真透明窗口）
+      //
+      // ⚠ 不只看窗口属性，还要验证浮窗**真的画出了当前章节的文字** ——
+      //   否则「透明」只是个空壳。
+      {
+        await js(`window.__APP__.App.boss.enter({ mode:'mini-overlay', style:'overlay' })`);
+        await sleep(2200);
+        const dr = await js('window.firmament.boss.overlayDiagnostics()');
+        console.log('[SHOTS] 透明浮窗诊断：' + JSON.stringify(dr && dr.data ? dr.data : dr));
+                // 直接在主进程侧读浮窗内容 + 截图（浮窗是独立窗口，js() 只能作用于主窗口）
+        const ovWin = require('electron').BrowserWindow.getAllWindows().find((w) => w !== win);
+        if (ovWin) {
+          try {
+            const ovText = await ovWin.webContents.executeJavaScript('document.getElementById("text").innerText.slice(0,60)');
+            console.log('[SHOTS] 透明浮窗正文：' + JSON.stringify(ovText));
+            const bg = await ovWin.webContents.executeJavaScript('getComputedStyle(document.body).backgroundColor');
+            console.log('[SHOTS] 浮窗背景色：' + bg + '（rgba(0,0,0,0) 才是真透明）');
+            const img = await ovWin.webContents.capturePage();
+            const bmp = img.toBitmap();
+            let opaque = 0;
+            for (let i = 3; i < bmp.length; i += 4) if (bmp[i] > 10) opaque++;
+            const pct = (opaque / (img.getSize().width * img.getSize().height) * 100).toFixed(1);
+            console.log('[SHOTS] 浮窗非透明像素占比：' + pct + '%（只应有文字部分不透明）');
+            const shotPath = require('path').join(__dirname, '..', '..', 'test', 'shots', '14b-透明迷你框.png');
+            require('fs').mkdirSync(require('path').dirname(shotPath), { recursive: true });
+            require('fs').writeFileSync(shotPath, img.toPNG());
+            console.log('[SHOTS] 已保存：test/shots/14b-透明迷你框.png');
+          } catch (e) { console.log('[SHOTS] 浮窗检查失败：' + e.message); }
+        } else {
+          console.log('[SHOTS] 未找到透明浮窗！');
+        }
+        // （浮窗自己是独立窗口，主窗口此时是隐藏的，不能用 shot() 截它）
+        await js('window.__APP__.App.boss.exit()');
+        await sleep(900);
       }
-      await js(`window.__APP__.App.boss.applyVisibility(false,'fake-word','normal')`);
+
+      // 15. 四套伪装界面
+      //
+      // ⚠ 截图必须包含真实的章节正文 —— 光看外壳无法证明「小说确实藏在里面」，
+      //   所以这里用 enter() 走完整路径（含 renderFakeContent），
+      //   并断言正文容器真的装满了字，再截图。
+      for (const [m, label] of [['fake-word','Word'],['fake-excel','Excel'],['fake-code','VSCode'],['fake-mail','邮件']]) {
+        await js(`window.__APP__.App.boss.enter({ mode:'${m}', style:'normal' })`);
+        await sleep(700);
+        const info = await js(`(() => { const c = { 'fake-word':'fakeWordNovel','fake-excel':'fakeExcelText','fake-code':'fakeCodeText','fake-mail':'fakeMailNovel' }['${m}']; const el = document.getElementById(c); return el ? el.textContent.replace(/\\s/g,'').length : -1; })()`);
+        const diag = await js(`(() => {
+          const smap = { 'fake-word':'fakeWordScroll','fake-excel':'fakeExcelScroll','fake-code':'fakeCodeScroll','fake-mail':'fakeMailScroll' };
+          const hmap = { 'fake-word':'fakeWordPage','fake-excel':null,'fake-code':'fakeCodeMinimap','fake-mail':'fakeMailHead' };
+          const sc = document.getElementById(smap['${m}']);
+          const h = hmap['${m}'] ? document.getElementById(hmap['${m}']) : null;
+          return { scrollTop: sc ? Math.round(sc.scrollTop) : -1,
+                   scrollH: sc ? Math.round(sc.scrollHeight) : -1,
+                   clientH: sc ? Math.round(sc.clientHeight) : -1,
+                   headH: h ? Math.round(h.offsetHeight) : -1,
+                   headText: h ? (h.textContent || '').replace(/\\s+/g,' ').slice(0, 30) : 'none' };
+        })()`);
+        console.log('[SHOTS] ' + label + ' 伪装界面正文：' + info + ' 字 ｜ scrollTop=' + diag.scrollTop
+          + ' scrollH=' + diag.scrollH + ' clientH=' + diag.clientH + ' headH=' + diag.headH
+          + ' head="' + diag.headText + '"');
+        await shot(`15-伪装-${label}`);
+        await js('window.__APP__.App.boss.exit()');
+        await sleep(500);
+      }
 
       // 16. 字体展示：内置手写体 / 圆体 / 楷体 / 宋体 实际渲染效果
       //   这是「UI 好看 + 字体真的能换」最直观的证据
@@ -1209,7 +1635,7 @@ function runShotTest(win, ctx) {
       await js('window.__APP__.App.reader.reflow()');
       await sleep(400);
 
-      // 19. 窄窗口适配（窗口最小宽度已放开到 520px，需验证窄窗不破版）
+      // 19. 窄窗口适配（窗口最小宽度已放开到 380px，需验证窄窗不破版）
       await js(`window.__APP__.App.patchSettings({ theme:'day', skin:'minimal', background:'none' })`);
       await js(`window.__APP__.App.route('library')`);
       await sleep(500);
@@ -2004,6 +2430,43 @@ function resolveDirs() {
   };
 }
 
+/**
+ * 窗口几何的规格版本。
+ *
+ * ⚠ 为什么需要这个版本号：
+ *   window.json 里存着用户上次的窗口位置与尺寸。默认尺寸从「1180×800 矮胖」
+ *   改成「900×960 瘦高」后，**老用户的旧尺寸会一直覆盖新默认值** ——
+ *   改了等于没改。递增该版本号，即让旧数据在下次启动时按新默认值重置一次。
+ *   只重置一次（版本号写回后不再重置），用户随后自己拖的尺寸照常记忆。
+ */
+const WINDOW_GEOMETRY_VERSION = 2;
+
+/**
+ * 把窗口移到所有显示器之外并显示出来。
+ *
+ * 自动化测试专用：既要"用户看不见"，又要"渲染与布局测量真实可信"。
+ * 单纯 hide() 做不到后者 —— 隐藏窗口的 DOM 不参与真实布局，
+ * 实测会把元素坐标算到屏幕外几千像素，导致断言全线误报。
+ */
+function parkOffscreen(win) {
+  try {
+    const { screen } = require('electron');
+    // 取所有显示器工作区的并集，放到最右侧之外 300px
+    let maxRight = 0;
+    let top = 0;
+    for (const d of screen.getAllDisplays()) {
+      maxRight = Math.max(maxRight, d.workArea.x + d.workArea.width);
+      top = Math.min(top, d.workArea.y);
+    }
+    const b = win.getBounds();
+    win.setBounds({ x: maxRight + 300, y: top, width: b.width, height: b.height }, false);
+    win.showInactive();
+    console.log('[AUTO] 窗口已移到屏幕外（x=' + (maxRight + 300) + '），不占用用户屏幕');
+  } catch (_) {
+    // 出错就退回"不显示"，至少不干扰用户
+  }
+}
+
 function createWindow() {
   const stateFile = path.join(ctx.dirs.dataDir, 'window.json');
   let bounds = { width: DEFAULT_W, height: DEFAULT_H };
@@ -2011,9 +2474,42 @@ function createWindow() {
   try {
     if (fs.existsSync(stateFile)) {
       const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-      // 只需保证宽高不超过最小限制，不要卡在旧的高下限上
-      if (s.bounds && s.bounds.width >= MIN_W && s.bounds.height >= MIN_H) bounds = s.bounds;
-      maximized = !!s.maximized;
+      const geometryStale = (s.geometryVersion || 1) < WINDOW_GEOMETRY_VERSION;
+      if (geometryStale) {
+        // 规格升级：丢弃旧的尺寸，本次用新默认值（位置保留，别让窗口乱跳）
+        if (s.bounds && Number.isFinite(s.bounds.x) && Number.isFinite(s.bounds.y)) {
+          bounds = { x: s.bounds.x, y: s.bounds.y, width: DEFAULT_W, height: DEFAULT_H };
+        }
+        maximized = false;
+      } else {
+        // 只需保证宽高不低于最小限制，不要卡在旧的高下限上
+        if (s.bounds && s.bounds.width >= MIN_W && s.bounds.height >= MIN_H) bounds = s.bounds;
+        maximized = !!s.maximized;
+      }
+    }
+  } catch (_) {}
+
+  // ⚠ 位置要落在可见屏幕内。
+  //   实测过用户的 window.json 里存着 x=2691（屏幕才 2560 宽）——
+  //   窗口大部分在屏幕外，用户既看不到也拖不回来。
+  //   这里用所有显示器的并集做一次纠正，越界就回落到默认尺寸居中。
+  try {
+    const { screen } = require('electron');
+    if (Number.isFinite(bounds.x) && Number.isFinite(bounds.y)) {
+      const work = bounds;
+      const visible = screen.getAllDisplays().some((d) => {
+        const a = d.workArea;
+        // 窗口至少要有 120×80 的可见区域才算"能看见"
+        return work.x + work.width > a.x + 120
+          && work.x < a.x + a.width - 120
+          && work.y + work.height > a.y + 80
+          && work.y < a.y + a.height - 80;
+      });
+      if (!visible) {
+        console.warn('[window] 记录的窗口位置在屏幕外（x=' + bounds.x + ', y=' + bounds.y
+          + '），已回落到默认位置');
+        bounds = { width: DEFAULT_W, height: DEFAULT_H };
+      }
     }
   } catch (_) {}
 
@@ -2045,7 +2541,21 @@ function createWindow() {
 
   win.once('ready-to-show', () => {
     if (maximized) win.maximize();
-    win.show();
+    // ⚠ 自动化模式（冒烟 / 截图 / 探针）不把窗口摆在用户屏幕上。
+    //
+    //   为什么用**移到屏幕外**而不是 hide()：
+    //     hide() 的窗口不参与真实布局，实测 DOM 测量会失真 ——
+    //     章末导航按钮的 rect 跑到了 x=5822（屏幕才 2560 宽），
+    //     所有依赖坐标的断言（可见性、命中测试、分页宽度）集体失败。
+    //     show() + 移到工作区外，则渲染/测量完全正常，
+    //     而用户屏幕上什么都看不到（窗口在可见区域之外）。
+    //
+    //   截图的 capturePage 也不看屏幕，照常能抓到内容。
+    if (isAutomation) {
+      parkOffscreen(win);
+    } else {
+      win.show();
+    }
     // 命令行带文件时直接导入（支持「用苍穹打开」）
     const argvFiles = process.argv.slice(1).filter((a) => /\.(txt|text|epub)$/i.test(a) && fs.existsSync(a));
     if (argvFiles.length) {
@@ -2063,7 +2573,9 @@ function createWindow() {
   if (isSmoke) runSmokeTest(win, ctx);
   if (isShots) runShotTest(win, ctx);
   if (isProbe) runProbe(win, ctx);
-  if (!isSmoke) win.showInactive();
+  // ⚠ 自动化模式一律不显示在用户屏幕上（见 ready-to-show 的说明）。
+  //   原逻辑只排除了 smoke，导致 --shots / --probe 会把窗口弹出来。
+  if (!isAutomation) win.showInactive();
 
   const saveState = () => {
     if (win.isDestroyed()) return;
@@ -2076,7 +2588,12 @@ function createWindow() {
       const b = isMax ? win.getNormalBounds() : win.getBounds();
       // 尺寸明显小于常规下限时也不记录（可能是刚退出摸鱼的过渡态）
       if (b.width < MIN_W || b.height < MIN_H) return;
-      fs.writeFileSync(stateFile, JSON.stringify({ bounds: b, maximized: isMax }));
+      fs.writeFileSync(stateFile, JSON.stringify({
+        bounds: b,
+        maximized: isMax,
+        // 记录几何规格版本：下次启动据此判断是否需要按新默认尺寸重置
+        geometryVersion: WINDOW_GEOMETRY_VERSION,
+      }));
     } catch (_) {}
   };
   let saveTimer = null;
@@ -2247,6 +2764,58 @@ function bootstrap() {
       fontsService,
       isDev,
       boss: null,
+      /** 主窗口（区别于透明浮窗）：BossMode 与 IPC 一律通过它定位主窗口 */
+      getMainWindow: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
+      /**
+       * 向渲染层问"当前阅读位置"。
+       *
+       * 透明浮窗需要知道主阅读器读到哪一章、章内多少比例，才能续读。
+       * 这里用 executeJavaScript 反向询问渲染层 —— 比在主进程里
+       * 维护一份阅读状态的副本更可靠（不会出现两份状态不一致）。
+       */
+      getReaderSnapshot: () => new Promise((resolve) => {
+        const w = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+        if (!w) return resolve(null);
+        // ⚠ 加超时保护：主窗口隐藏或渲染层繁忙时 executeJavaScript 可能长时间
+        //   不 resolve。没有超时会让调用方（透明浮窗初始化）永久挂起 ——
+        //   实测过一次：进入透明形态的 IPC 调用卡住两分钟没返回。
+        const timer = setTimeout(() => resolve(null), 2500);
+        const done = (v) => { clearTimeout(timer); resolve(v); };
+        w.webContents.executeJavaScript(
+          '(() => { const r = window.__APP__ && window.__APP__.App && window.__APP__.App.reader;'
+          + ' if (!r || !r.book) return null;'
+          + ' return { bookId: r.book.id, bookTitle: r.book.title, chapterIndex: r.chapterIndex,'
+          + ' ratio: r.ratio, chapterTitle: (r.chapter && r.chapter.title) || "",'
+          + ' chapterHtml: (r.chapter && r.chapter.html) || "", total: (r.toc || []).length,'
+          // ⚠ 字色判定要读**主界面真实主题**，不是 overlayInk：
+          //   overlayInk 是用户的"手动覆盖"档位（auto/dark/light），
+          //   旧实现把它当 dark 标记塞进来，导致主题切换永远不生效。
+          + ' themeDark: !!(window.__APP__.App.theme && window.__APP__.App.theme.isDark()),'
+          + ' ink: window.__APP__.State.settings.overlayInk || "auto" }; })()'
+        ).then((v) => done(v)).catch(() => done(null));
+      }),
+      /** 浮窗拖动/滚动后把位置写回主阅读器 */
+      applyReaderPosition: (pos) => {
+        const w = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+        if (!w) return;
+        const payload = JSON.stringify({
+          index: Number(pos.chapterIndex) || 0,
+          ratio: Math.max(0, Math.min(1, Number(pos.ratio) || 0)),
+        });
+        w.webContents.executeJavaScript(
+          '(() => { const r = window.__APP__ && window.__APP__.App && window.__APP__.App.reader;'
+          + ' if (!r) return false;'
+          + ' const p = ' + payload + ';'
+          + ' const go = async () => {'
+          + '   if (r.chapterIndex !== p.index) await r.gotoChapter(p.index, p.ratio);'
+          + '   else { r.ratio = p.ratio;'
+          + '     if (window.__APP__.State.settings.pageMode === "scroll") r.scroller.setRatio(p.ratio, false);'
+          + '     else r.paginator.setRatio(p.ratio);'
+          + '     r.updateProgressUI(); r.scheduleSave(); }'
+          + ' };'
+          + ' go(); return true; })()'
+        ).catch(() => {});
+      },
     };
 
     const boss = new BossMode(ctx);

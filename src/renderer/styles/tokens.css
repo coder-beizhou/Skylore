@@ -113,6 +113,12 @@
   --reader-mb: 64px;
   --reader-ml: 88px;
   --reader-mr: 88px;
+  /* 用户设定的原始边距（未被窄窗收敛）。窄窗媒体查询读这个值做上限收敛，
+     见 styles/responsive.css 与 js/lib/theme.js 的说明。 */
+  --reader-mt-raw: 64px;
+  --reader-mb-raw: 64px;
+  --reader-ml-raw: 88px;
+  --reader-mr-raw: 88px;
   --reader-max-width: none;
   --reader-brightness: 1;
   --reader-page-gap: 48px;

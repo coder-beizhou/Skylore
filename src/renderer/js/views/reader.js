@@ -205,6 +205,8 @@ export class ReaderView {
     this.renderTitlebar();
     this.markTocActive();
     this.prefetch(index);
+    // 通知摸鱼视图：章节已变，伪装界面里的正文需要同步刷新
+    this.bus.emit('reader:chapter', { index });
   }
 
   /** 带内存缓存的章节读取（连续滚动会频繁取相邻章，缓存能显著减少等待） */
@@ -783,8 +785,9 @@ export class ReaderView {
     // ⚠ 不要再因用户操作而暂停自动滚动（见 autoscrollPauseByUser 的说明）。
     //   自动滚动运行期间连 UI 都不必唤起 —— 用户就是想让画面安静地自己走。
     if (this.autoscroll) return;
-    this.showUI(false);
-    // 自动翻页：用户手动翻页后重置计时，避免"刚翻完立刻又被自动翻走"
+    // ⚠ 行为变更（用户明确要求）：滚动/翻页**不再**自动弹出工具栏，
+    //   只有主动点击中部才会唤出（stage click 处理）。
+    //   这里只负责重置自动翻页计时，避免"刚翻完立刻又被自动翻走"。
     if (this.autoTurner.enabled) this.autoTurner.kick();
   }
 
@@ -908,11 +911,12 @@ export class ReaderView {
     const cur = (this.state.settings.bossMode) || 'fake-word';
 
     const ITEMS = [
-      { key: 'fake-word', label: 'Word 文档', desc: '一份会议纪要，最不引人注意' },
-      { key: 'fake-excel', label: 'Excel 表格', desc: '带行列号与公式栏的数据表' },
-      { key: 'fake-code', label: 'VS Code', desc: '带语法高亮的代码编辑器' },
-      { key: 'fake-mail', label: 'Outlook 邮件', desc: '三栏邮件客户端' },
-      { key: 'mini-text', label: '纯文字迷你框', desc: '一个正方形小方框，只有正文，最隐蔽' },
+      { key: 'fake-word', label: 'Word 文档', desc: '一份会议纪要，正文即小说，最不引人注意' },
+      { key: 'fake-excel', label: 'Excel 表格', desc: '数据表 + 备注列，小说藏在备注列里' },
+      { key: 'fake-code', label: 'VS Code', desc: 'notes.md 里就是正文，带 minimap 与终端' },
+      { key: 'fake-mail', label: 'Outlook 邮件', desc: '三栏邮件客户端，邮件正文即小说' },
+      { key: 'mini-text', label: '纯文字迷你框', desc: '一个小方框只有正文，左下/右下角可拖拽调大小' },
+      { key: 'mini-overlay', label: '透明迷你框', desc: '背景全透明，文字直接浮在桌面上，可拖拽缩放' },
     ];
 
     const list = el('div.boss-menu');
@@ -920,7 +924,7 @@ export class ReaderView {
       const row = el('button.boss-menu__item', {
         class: m.key === cur ? 'is-active' : '',
       }, [
-        el('span.boss-menu__icon', { html: icon(m.key === 'mini-text' ? 'ghost' : 'layout', 16) }),
+        el('span.boss-menu__icon', { html: icon(/^mini-/.test(m.key) ? 'ghost' : 'layout', 16) }),
         el('span.boss-menu__text', {}, [
           el('span.boss-menu__label', { text: m.label }),
           el('span.boss-menu__desc', { text: m.desc }),
@@ -928,8 +932,9 @@ export class ReaderView {
       ]);
       row.addEventListener('click', async () => {
         overlay.remove();
-        // 方框形态用 square，其余（Word/Excel/代码/邮件）都是 normal 伪装窗口
-        const style = m.key === 'mini-text' ? 'square' : 'normal';
+        // 迷你框 → square；透明浮窗 → overlay；其余伪装界面 → normal
+        const style = m.key === 'mini-text' ? 'square'
+          : (m.key === 'mini-overlay' ? 'overlay' : 'normal');
         this.app.patchSettings({ bossMode: m.key, bossStyle: style });
         await this.app.boss.enter({ mode: m.key, style });
         toast('已进入' + m.label + ' · 按 Esc 或点右上角 × 退出', { duration: 2600 });
@@ -1351,19 +1356,26 @@ export class ReaderView {
     //   否则当作普通点击放行给原有逻辑。
     this.bindWindowDrag();
 
-    // 阅读区鼠标移动 → 显示 UI。
-    // ⚠ 自动滚动期间直接忽略鼠标：既不暂停滚动，也不弹出工具栏
-    //   （用户挪一下鼠标就把自动滚动弄停，是此前最被诟病的行为）。
+    // 阅读区鼠标移动 —— 刻意**不**唤起工具栏。
+    //
+    // ⚠ 行为变更（用户明确要求）：
+    //   以前移动鼠标就会把顶栏/底栏弹出来，滚动阅读时鼠标稍有动作
+    //   工具栏就闪一下，非常干扰。现在滚动（以及任何鼠标移动）
+    //   都不会显示工具栏，**只有主动点击**才会唤出（见下方 stage 点击）。
+    //
+    //   保留一个窄例外：工具栏已经显示时，鼠标在顶栏/底栏区域内移动
+    //   可以延长它的停留时间 —— 用户正要去点按钮，别让它中途消失。
     const reader = $('#reader');
-    reader.addEventListener('mousemove', rafThrottle(() => {
+    reader.addEventListener('mousemove', rafThrottle((e) => {
       if (this.autoscroll) return;
-      if (this.uiHidden) this.showUI(false);
-      else this.scheduleHideUI();
+      if (this.uiHidden) return;                 // 隐藏状态下鼠标移动不再唤起
+      const bar = e.target.closest && e.target.closest('#readerTopbar, #readerBottombar, .reader-fabs');
+      if (bar) this.scheduleHideUI();            // 已显示且鼠标在工具条上 → 延长
     }));
     reader.addEventListener('mouseleave', () => {
       if (this.drawerOpen) return;
       if (this.autoscroll) return;
-      this.scheduleHideUI();
+      if (!this.uiHidden) this.scheduleHideUI();
     });
 
     // 滚轮。
@@ -1394,7 +1406,12 @@ export class ReaderView {
         const handled = this.scroller.wheelScroll(e);
         if (handled) {
           this.continuous.ensureEdges();
-          this.onUserInteract();
+          // 滚动阅读时不唤出工具栏（用户要求）；若正显示则收起
+          if (!this.autoscroll) {
+            if (!this.uiHidden) this.hideUI(true);
+            // 自动翻页的计时仍要重置
+            if (this.autoTurner.enabled) this.autoTurner.kick();
+          }
         }
         return;
       }
@@ -1448,6 +1465,11 @@ export class ReaderView {
     // 键盘：方向键 / 翻页键 / 空格
     on(document, 'keydown', (e) => {
       if (this.state.view !== 'reader') return;
+      // ⚠ 摸鱼激活时完全让位：伪装界面/迷你框有自己的翻页语义，
+      //   阅读器若继续执行 nextPage()/prevPage()，会和伪装容器的滚动
+      //   互相覆盖（双 handler 都 preventDefault），表现为翻页失灵。
+      //   boss.js 侧另有 stopPropagation 做第一道防线，这里是双保险。
+      if (this.app && this.app.boss && this.app.boss.isActive) return;
       const tag = (e.target.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea') return;
 

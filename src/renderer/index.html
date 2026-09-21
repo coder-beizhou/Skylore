@@ -218,45 +218,120 @@
   <div class="boss-mini__hint">
     <span id="bossMiniHint"></span>
   </div>
+  <!-- 双角缩放手柄：左下角与右下角都能拖动调整迷你框大小 -->
+  <div class="boss-mini__grip boss-mini__grip--bl" id="bossMiniGripBL" title="拖动调整大小"></div>
+  <div class="boss-mini__grip boss-mini__grip--br" id="bossMiniGripBR" title="拖动调整大小"></div>
+  <div class="boss-mini__size" id="bossMiniSize"></div>
 </div>
 
 <!-- ============ 摸鱼：伪装界面 ============ -->
 <div class="fake fake--word" id="fakeWord">
+  <!-- Win11 风格标题栏：快速访问工具栏 + 文件名 + 窗口按钮 -->
+  <div class="win-bar">
+    <span class="win-bar__qat" title="自动保存">⟳</span>
+    <span class="win-bar__qat" title="保存">💾</span>
+    <span class="win-bar__qat" title="撤销">↶</span>
+    <span class="win-bar__qat" title="重做">↷</span>
+    <span class="win-bar__title">会议纪要.docx - Word</span>
+    <span class="win-bar__spacer"></span>
+    <span class="win-bar__acct">刘婷</span>
+    <span class="win-bar__btns">
+      <i class="win-btn">─</i><i class="win-btn">▢</i><i class="win-btn win-btn--close">✕</i>
+    </span>
+  </div>
   <div class="fake__chrome">
     <div class="fake__tabbar">
       <div class="fake__tab is-active"><span>会议纪要.docx</span></div>
     </div>
   </div>
-  <div class="fake__toolbar">
-    <span class="fake__tool">文件</span><span class="fake__tool">开始</span>
-    <span class="fake__tool">插入</span><span class="fake__tool">布局</span>
-    <span class="fake__tool">引用</span><span class="fake__tool">审阅</span>
-    <span class="fake__sep"></span>
-    <span class="fake__tool">宋体</span><span class="fake__tool">五号</span>
-    <span class="fake__sep"></span>
-    <span class="fake__tool">B</span><span class="fake__tool">I</span><span class="fake__tool">U</span>
+  <div class="ribbon-tabs">
+    <span class="ribbon-tab is-active">开始</span><span class="ribbon-tab">插入</span>
+    <span class="ribbon-tab">绘图</span><span class="ribbon-tab">设计</span>
+    <span class="ribbon-tab">布局</span><span class="ribbon-tab">引用</span>
+    <span class="ribbon-tab">邮件</span><span class="ribbon-tab">审阅</span><span class="ribbon-tab">视图</span>
   </div>
-  <div class="fake__main">
-    <div class="fake-page" id="fakeWordPage"></div>
+  <div class="fake__toolbar ribbon-body">
+    <div class="ribbon-group">
+      <div class="ribbon-group__row">
+        <span class="fake__tool">✂</span><span class="fake__tool">📋</span><span class="fake__tool">🖌</span>
+      </div>
+      <div class="ribbon-group__label">剪贴板</div>
+    </div>
+    <div class="ribbon-group">
+      <div class="ribbon-group__row">
+        <span class="fake__tool fake__tool--sel">宋体</span>
+        <span class="fake__tool fake__tool--sel">五号</span>
+      </div>
+      <div class="ribbon-group__label">字体</div>
+    </div>
+    <div class="ribbon-group">
+      <div class="ribbon-group__row">
+        <span class="fake__tool"><b>B</b></span><span class="fake__tool"><i>I</i></span>
+        <span class="fake__tool"><u>U</u></span><span class="fake__tool">A</span>
+      </div>
+      <div class="ribbon-group__label">字体</div>
+    </div>
+    <div class="ribbon-group">
+      <div class="ribbon-group__row">
+        <span class="fake__tool">☰</span><span class="fake__tool">≡</span><span class="fake__tool">⤶</span>
+      </div>
+      <div class="ribbon-group__label">段落</div>
+    </div>
+    <div class="ribbon-group">
+      <div class="ribbon-group__row">
+        <span class="fake__tool">Aa</span><span class="fake__tool">𝔸</span><span class="fake__tool">🔍</span>
+      </div>
+      <div class="ribbon-group__label">样式</div>
+    </div>
+  </div>
+  <div class="fake__ruler" id="fakeWordRuler"></div>
+  <!-- 正文区即滚动容器：小说按"文档"排版塞在里面，滚轮/翻页与阅读器同步 -->
+  <div class="fake__main" id="fakeWordScroll">
+    <div class="fake-page">
+      <!-- 抬头部分：固定的会议纪要信息（伪装用，始终不变） -->
+      <div class="fake-page__head" id="fakeWordPage"></div>
+      <!-- 正文部分：当前章节的小说内容 -->
+      <div class="fake-page__body" id="fakeWordNovel"></div>
+    </div>
   </div>
   <div class="statusbar">
-    <span>第 1 页，共 3 页</span><span>1,248 个字</span>
+    <span id="fakeWordStatus">第 1 页，共 3 页</span>
+    <span id="fakeWordChars">1,248 个字</span>
     <span style="flex:1"></span><span>100%</span>
   </div>
 </div>
 
 <div class="fake fake--excel" id="fakeExcel">
-  <div class="ribbon">
-    <strong>Q3经营数据分析.xlsx</strong>
-    <span>开始</span><span>插入</span><span>公式</span>
-    <span>数据</span><span>审阅</span><span>视图</span>
+  <div class="win-bar win-bar--excel">
+    <span class="win-bar__qat">💾</span><span class="win-bar__qat">↶</span><span class="win-bar__qat">↷</span>
+    <span class="win-bar__title">Q3经营数据分析.xlsx - Excel</span>
+    <span class="win-bar__spacer"></span>
+    <span class="win-bar__acct">张明</span>
+    <span class="win-bar__btns">
+      <i class="win-btn">─</i><i class="win-btn">▢</i><i class="win-btn win-btn--close">✕</i>
+    </span>
   </div>
-  <div class="fake__toolbar">
-    <span class="fake__tool">剪切</span><span class="fake__tool">复制</span>
-    <span class="fake__tool">粘贴</span><span class="fake__sep"></span>
-    <span class="fake__tool">常规</span><span class="fake__tool">%</span>
-    <span class="fake__sep"></span>
-    <span class="fake__tool">Σ 自动求和</span>
+  <div class="ribbon-tabs ribbon-tabs--excel">
+    <span class="ribbon-tab is-active">开始</span><span class="ribbon-tab">插入</span>
+    <span class="ribbon-tab">公式</span><span class="ribbon-tab">数据</span>
+    <span class="ribbon-tab">审阅</span><span class="ribbon-tab">视图</span>
+  </div>
+  <div class="fake__toolbar ribbon-body">
+    <div class="ribbon-group">
+      <div class="ribbon-group__row"><span class="fake__tool">✂</span><span class="fake__tool">⧉</span></div>
+      <div class="ribbon-group__label">剪贴板</div>
+    </div>
+    <div class="ribbon-group">
+      <div class="ribbon-group__row">
+        <span class="fake__tool fake__tool--sel">常规</span>
+        <span class="fake__tool">%</span><span class="fake__tool">,</span>
+      </div>
+      <div class="ribbon-group__label">数字</div>
+    </div>
+    <div class="ribbon-group">
+      <div class="ribbon-group__row"><span class="fake__tool">Σ</span><span class="fake__tool">fx</span></div>
+      <div class="ribbon-group__label">函数库</div>
+    </div>
   </div>
   <div class="formula-bar">
     <div class="formula-bar__cell" id="fakeExcelCell">A1</div>
@@ -265,19 +340,46 @@
   </div>
   <div class="fake__main">
     <div class="sheet" id="fakeExcelSheet"></div>
+    <!-- 说明列：看起来就是表格里的一长列备注，实际是小说正文 -->
+    <div class="sheet-note">
+      <div class="sheet-note__cols"><span>G</span><span>H</span><span>I</span></div>
+      <div class="sheet-note__scroll" id="fakeExcelScroll">
+        <!-- 说明列表头：固定的伪装内容 -->
+        <div class="sheet-note__head" id="fakeExcelHead">备注说明（正文）</div>
+        <!-- 正文：当前章节的小说内容 -->
+        <div class="sheet-note__inner" id="fakeExcelText"></div>
+      </div>
+    </div>
+  </div>
+  <div class="sheet-tabs">
+    <span class="sheet-tab is-active">Sheet1</span>
+    <span class="sheet-tab">Sheet2</span>
+    <span class="sheet-tab">Sheet3</span>
+    <span class="sheet-tab__add">+</span>
   </div>
   <div class="statusbar">
-    <span>就绪</span><span>平均值: 1,284,530</span><span>计数: 480</span>
-    <span style="flex:1"></span><span>100%</span>
+    <span id="fakeExcelStatus">就绪</span><span>平均值: 1,284,530</span><span>计数: 480</span>
+    <span style="flex:1"></span>
+    <span class="statusbar__zoom">−</span>
+    <span class="statusbar__zoomline"><i style="width:62%"></i></span>
+    <span class="statusbar__zoom">+</span>
+    <span>100%</span>
   </div>
 </div>
 
 <div class="fake fake--code" id="fakeCode">
+  <div class="win-bar win-bar--code">
+    <span class="win-bar__title">notes.md - 苍穹工作区 - Visual Studio Code</span>
+    <span class="win-bar__spacer"></span>
+    <span class="win-bar__btns">
+      <i class="win-btn">─</i><i class="win-btn">▢</i><i class="win-btn win-btn--close">✕</i>
+    </span>
+  </div>
   <div class="fake__chrome">
     <div class="fake__tabbar">
-      <div class="fake__tab is-active"><span>server.ts</span></div>
+      <div class="fake__tab is-active"><span>notes.md</span></div>
+      <div class="fake__tab"><span>server.ts</span></div>
       <div class="fake__tab"><span>router.ts</span></div>
-      <div class="fake__tab"><span>schema.prisma</span></div>
     </div>
   </div>
   <div class="code-main">
@@ -286,7 +388,7 @@
       <div class="explorer__title">资源管理器</div>
       <div class="explorer__item explorer__item--dir">▾ src</div>
       <div class="explorer__item">　api</div>
-      <div class="explorer__item is-on">　server.ts</div>
+      <div class="explorer__item is-on">　notes.md</div>
       <div class="explorer__item">　router.ts</div>
       <div class="explorer__item">　db.ts</div>
       <div class="explorer__item explorer__item--dir">▾ prisma</div>
@@ -295,7 +397,33 @@
       <div class="explorer__item">package.json</div>
       <div class="explorer__item">tsconfig.json</div>
     </div>
-    <div class="code-area" id="fakeCodeArea"></div>
+    <div class="code-pane">
+      <div class="breadcrumb">
+        <span>src</span><span class="breadcrumb__sep">›</span>
+        <span>notes.md</span><span class="breadcrumb__sep">›</span>
+        <span class="breadcrumb__sym">¶ 正文</span>
+      </div>
+      <!-- 打开的是一份 notes.md：正文即小说 -->
+      <div class="code-area" id="fakeCodeScroll">
+        <!-- 文件头注释：固定的伪装内容 -->
+        <div class="code-area__head">// notes.md — 工作笔记 · 最后编辑 张明 2026-09-19</div>
+        <!-- 正文：当前章节的小说内容 -->
+        <div class="code-area__inner" id="fakeCodeText"></div>
+      </div>
+    </div>
+    <div class="minimap" id="fakeCodeMinimap"></div>
+  </div>
+  <div class="panel">
+    <div class="panel__tabs">
+      <span class="panel__tab is-active">问题</span>
+      <span class="panel__tab">输出</span>
+      <span class="panel__tab">调试控制台</span>
+      <span class="panel__tab">终端</span>
+    </div>
+    <div class="panel__body">
+      <div class="panel__line"><span class="panel__ico panel__ico--warn">▲</span> 2 个警告：未使用的变量 <code>pageSize</code></div>
+      <div class="panel__line"><span class="panel__ico">ⓘ</span> TypeScript 5.9.3 · 项目已加载</div>
+    </div>
   </div>
   <div class="statusbar">
     <span>main*</span><span>0 个错误</span><span>2 个警告</span>
@@ -305,6 +433,14 @@
 </div>
 
 <div class="fake fake--mail" id="fakeMail">
+  <div class="win-bar win-bar--mail">
+    <span class="win-bar__title">收件箱 - 张明 - Outlook</span>
+    <span class="win-bar__spacer"></span>
+    <span class="win-bar__acct">经营分析组</span>
+    <span class="win-bar__btns">
+      <i class="win-btn">─</i><i class="win-btn">▢</i><i class="win-btn win-btn--close">✕</i>
+    </span>
+  </div>
   <div class="fake__chrome">
     <div class="fake__tabbar">
       <div class="fake__tab is-active"><span>收件箱 - Outlook</span></div>
@@ -319,15 +455,23 @@
   </div>
   <div class="fake__main">
     <div class="mail-side">
-      <div class="mail-side__item is-on"><span class="mail-side__dot"></span>收件箱</div>
-      <div class="mail-side__item">草稿</div>
+      <div class="mail-side__item is-on"><span class="mail-side__dot"></span>收件箱<span class="mail-side__count">12</span></div>
+      <div class="mail-side__item"><span class="mail-side__dot mail-side__dot--dim"></span>草稿<span class="mail-side__count">2</span></div>
       <div class="mail-side__item">已发送</div>
-      <div class="mail-side__item">已删除</div>
+      <div class="mail-side__item">已删除<span class="mail-side__count">3</span></div>
       <div class="mail-side__item">垃圾邮件</div>
       <div class="mail-side__item">存档</div>
+      <div class="mail-side__group">我的文件夹</div>
+      <div class="mail-side__item">经营分析</div>
+      <div class="mail-side__item">项目跟踪</div>
     </div>
     <div class="mail-list" id="fakeMailList"></div>
-    <div class="mail-view" id="fakeMailView"></div>
+    <div class="mail-view" id="fakeMailScroll">
+      <!-- 邮件头：固定的发件人/主题/时间（伪装用） -->
+      <div class="mail-view__head" id="fakeMailHead"></div>
+      <!-- 正文：当前章节的小说内容 -->
+      <div class="mail-view__inner" id="fakeMailNovel"></div>
+    </div>
   </div>
 </div>
 

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>便签</title>
+<!--
+  透明迷你框浮窗。
+
+  ⚠ 这是一个**独立的透明窗口**（见 main/boss.js#setupOverlay），
+     不是主界面的一部分：
+       · 背景完全透明 → 只有文字浮在桌面/其他软件上
+       · 用自己的阅读位置同步通道与主阅读器互通（overlay:position）
+       · 双角把手可拖拽缩放，滚轮按行滚动，点两侧翻页
+
+     字体与配色刻意与主阅读器保持一致，退出后接续阅读时不会有割裂感。
+-->
+<style>
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: transparent;   /* 关键：整个窗口透明 */
+    overflow: hidden;
+    /* 透明窗口里不能有整块背景色，否则"透明"就失效了 */
+  }
+
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: default;
+  }
+
+  /* 正文容器：默认完全透明，只画字 */
+  #box {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: transparent;
+  }
+
+  /* 拖拽区：整个顶部区域，按住即可移动窗口 */
+  #drag {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 26px;
+    cursor: move;
+    z-index: 6;
+  }
+
+  #text {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: 18px 16px 16px;
+    font-size: 16px;
+    line-height: 1.72;
+    letter-spacing: 0.01em;
+    text-align: left;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    /* ⚠ 不加任何 text-shadow / 描边。
+       早期为了"任何壁纸都看得清"加了白色泛光，结果在深色背景上
+       整片字周围糊出一圈白雾，比看不清更难看。
+       透明框的定位就是「纯文字浮在桌面上」：默认纯黑字（放在白底/浅色
+       文档上看），深色壁纸请在设置里切成浅色字模式。 */
+    --ink: #000000;
+    color: var(--ink);
+  }
+
+  /* 浅色字：给深色桌面背景用（设置里可切） */
+  body.ink-light #text {
+    --ink: #ffffff;
+  }
+
+  #text p {
+    margin: 0 0 0.62em;
+    text-indent: 2em;
+  }
+
+  #text p:last-child { margin-bottom: 0; }
+
+  /* 顶部极细进度线 */
+  #line {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 2px;
+    width: 0;
+    background: currentColor;
+    opacity: 0.32;
+    z-index: 5;
+    transition: width 240ms ease-out;
+    color: #4a6fa5;
+  }
+
+  /* 悬停提示：仅提示操作方式，不遮挡文字 */
+  #hint {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 2px;
+    text-align: center;
+    font-size: 10px;
+    color: #666;
+    opacity: 0;
+    transition: opacity 200ms ease-out;
+    pointer-events: none;
+    z-index: 5;
+  }
+
+  body:hover #hint { opacity: 0.5; }
+
+  /**
+   * 双角缩放手柄（左下 / 右下）。
+   *
+   * ⚠ 把手不能依赖 -webkit-app-region：那是拖拽区，不负责缩放。
+   *   这里用 JS 监听鼠标位移，换算成窗口宽高后调 IPC 改窗口尺寸
+   *   （见下方 bindResize）。
+   *
+   *   视觉上默认完全不可见（保持"只有文字"），只在鼠标靠近角落时
+   *   显示一个极轻的斜纹角标。
+   */
+  .grip {
+    position: absolute;
+    bottom: 0;
+    width: 22px;
+    height: 22px;
+    cursor: nwse-resize;
+    z-index: 7;
+    opacity: 0;
+    transition: opacity 160ms ease-out;
+    background:
+      linear-gradient(135deg, transparent 46%, rgba(120, 120, 120, 0.85) 46%, rgba(120, 120, 120, 0.85) 54%, transparent 54%),
+      linear-gradient(135deg, transparent 66%, rgba(120, 120, 120, 0.6) 66%, rgba(120, 120, 120, 0.6) 74%, transparent 74%);
+  }
+
+  #gripBR { right: 0; }
+  /* 左下角的斜纹方向是镜像的，否则视觉上像"右下角" */
+  #gripBL { left: 0; transform: scaleX(-1); }
+
+  body:hover .grip { opacity: 0.28; }
+  .grip:hover { opacity: 0.8 !important; }
+
+  /* 缩放中：给出实时尺寸提示，让用户知道确切的宽高 */
+  #size {
+    position: absolute;
+    right: 4px;
+    bottom: 26px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(30, 30, 30, 0.78);
+    color: #fff;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 8;
+    transition: opacity 120ms;
+  }
+
+  #size.on { opacity: 1; }
+
+  /* 退出按钮：透明热区，悬停才显形（与主迷你框一致） */
+  #close {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: transparent;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 9;
+    border-radius: 0 0 0 6px;
+    display: grid;
+    place-items: center;
+  }
+
+  #close:hover {
+    color: #666;
+    background: rgba(150, 150, 150, 0.22);
+  }
+</style>
+</head>
+<body>
+  <div id="box">
+    <div id="drag"></div>
+    <div id="line"></div>
+    <button id="close" title="退出透明迷你框（Esc）">✕</button>
+    <div id="text"></div>
+    <div id="hint">拖动可移动 · 双角拖拽调大小 · 滚轮滚动 · 点两侧翻页 · Esc 退出</div>
+    <div id="size"></div>
+    <div class="grip" id="gripBL" title="拖动调整大小"></div>
+    <div class="grip" id="gripBR" title="拖动调整大小"></div>
+  </div>
+
+<script src="boss-overlay.js"></script>
+</body>
+</html>

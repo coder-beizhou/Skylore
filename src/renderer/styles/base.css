@@ -190,6 +190,10 @@ button {
   gap: var(--sp-1);
   flex: 0 0 auto;
   -webkit-app-region: no-drag;
+  /* ⚠ 必须靠右：窄屏媒体查询会把 brand / center 都 display:none，
+     此时 .titlebar__right 成为唯一 flex 子项 —— 没有 margin-left:auto
+     它就会贴到标题栏**左边**（Windows 用户的肌肉记忆是右上角）。 */
+  margin-left: auto;
 }
 
 .win-controls {

@@ -1025,7 +1025,11 @@ body.is-dragging-mini * {
 }
 
 /* —— Word —— */
-.fake--word .fake__main { background: #808080; justify-content: center; padding: 22px 0; overflow: auto; }
+/* ⚠ padding 必须为 0：滚动容器带内边距时，滚出去的内容会在内边距区域
+   继续显示（padding 属于 scrollport），于是标尺和纸张之间会露出一条
+   被裁切的正文残行 —— 用户看到的就是"多出来一条不对的东西"。
+   留白改由纸张自身的 margin 提供。 */
+.fake--word .fake__main { background: #808080; justify-content: center; padding: 0; overflow: auto; }
 
 .fake-page {
   width: 700px;
@@ -1036,7 +1040,27 @@ body.is-dragging-mini * {
   font-size: 14.5px;
   line-height: 1.85;
   color: #1a1a1a;
-  overflow: hidden;
+  /* ⚠ 不加 overflow:hidden —— 那会把整章正文裁成一屏（见 Word 纸张说明） */
+}
+
+/*
+ * ⚠ Word 纸张必须「由内容决定高度、容器负责滚动」。
+ *
+ *   原先纸张被 flex 容器压成一屏高 + overflow:hidden，
+ *   整章小说只显示开头一屏，剩下的全被裁掉 ——
+ *   用户既读不到后文，翻页也毫无反应（内容根本没变长）。
+ *   现在：纸张从顶部开始、高度随内容增长，滚动交给 .fake__main。
+ */
+.fake--word .fake__main {
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.fake--word .fake-page {
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 0;
+  margin: 22px auto 48px;   /* 上下留白由纸张 margin 提供（容器 padding 会露残行） */
 }
 
 .fake-page h1 {
@@ -1052,7 +1076,10 @@ body.is-dragging-mini * {
 .fake-page .doc-no { text-indent: 0; font-weight: 600; margin-top: 18px; }
 
 /* —— Excel —— */
-.fake--excel .fake__main { flex-direction: column; background: #fff; }
+/* ⚠ 原 flex-direction:column 已删：Excel 是「数据表 + 右侧备注列」的横向布局，
+   后面 .fake--excel .fake__main { flex-direction: row } 才是生效规则，
+   这条 column 是早期遗留的死规则（被覆盖、永不生效）。 */
+.fake--excel .fake__main { background: #fff; }
 
 .ribbon {
   flex: 0 0 auto;
@@ -1211,7 +1238,9 @@ body.is-dragging-mini * {
   flex: 1;
   min-width: 0;
   overflow: auto;
-  padding: 10px 0;
+  /* ⚠ padding 归零：滚动容器的 padding 属于 scrollport，滚出去的内容
+     会在 padding 区继续显示成一条残行。留白交给 .code-area__inner。 */
+  padding: 0;
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.62;
@@ -1289,7 +1318,8 @@ body.is-dragging-mini * {
 .mail-view {
   flex: 1;
   min-width: 0;
-  padding: 22px 28px;
+  /* ⚠ 同 Word：padding 归零，留白交给 .mail-view__inner，避免滚动残行 */
+  padding: 0;
   overflow: auto;
   font-size: 13px;
   color: #201f1e;
@@ -1309,4 +1339,617 @@ body.is-dragging-mini * {
 body.is-boss-square #app { display: none; }
 body.is-boss-square .boss-mini { display: flex; }
 
+/* ⚠ 伪装窗口模式同样必须隐藏 #app。
+   之前只隐藏了 square / overlay 两种形态，normal（Word/Excel/VSCode/邮件）
+   漏了 —— 阅读器的章节标题、顶栏会从伪装界面后面透出来，
+   在标尺附近形成一条"不属于 Word 的东西"（用户截图指出的那条）。
+   伪装界面是 #app 的兄弟节点，隐藏 #app 不影响它们。 */
+body.is-boss-normal #app { display: none; }
+
 body.is-boss-ghost #app { opacity: 0.5; }
+
+/* ==========================================================================
+   迷你框双角缩放手柄
+   ==========================================================================
+   左下角与右下角都能拖拽调整窗口大小（见 views/boss.js#bindMiniResize）。
+   视觉上平时完全不可见（维持「只有文字」的纯粹感），
+   只在鼠标靠近时露出极轻的斜纹角标。 */
+.boss-mini__grip {
+  position: absolute;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+  background:
+    linear-gradient(135deg, transparent 46%, var(--tx-tertiary) 46%, var(--tx-tertiary) 54%, transparent 54%),
+    linear-gradient(135deg, transparent 66%, var(--tx-tertiary) 66%, var(--tx-tertiary) 74%, transparent 74%);
+}
+
+.boss-mini__grip--br { right: 0; cursor: nwse-resize; }
+.boss-mini__grip--bl { left: 0; cursor: nesw-resize; transform: scaleX(-1); }
+
+.boss-mini:hover .boss-mini__grip { opacity: 0.22; }
+.boss-mini__grip:hover { opacity: 0.7 !important; }
+
+/* 缩放中给出实时尺寸，让用户知道确切宽高 */
+.boss-mini__size {
+  position: absolute;
+  right: 6px;
+  bottom: 24px;
+  padding: 2px 7px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--tx-primary) 78%, transparent);
+  color: var(--bg-surface);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 6;
+  transition: opacity 120ms var(--ease-out);
+}
+
+.boss-mini__size.is-on { opacity: 1; }
+
+body.is-resizing-mini,
+body.is-resizing-mini * {
+  cursor: nwse-resize !important;
+  user-select: none !important;
+}
+
+/* 透明浮窗形态：主界面整体让位（内容由独立浮窗窗口呈现） */
+body.is-boss-overlay #app { display: none; }
+
+/* ==========================================================================
+   伪装界面：Win11 风格标题栏（Word / Excel / VS Code / Outlook 通用）
+   ==========================================================================
+   真实感的关键在于「窗口自身也长着标题栏」——
+   只有内容区没有窗口边框时，一眼就能看出是被裁出来的截图。
+   注意：这一层纯装饰，双击它退出摸鱼（见 bindFakeExit）。 */
+.win-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 0 0 10px;
+  background: #f3f3f3;
+  color: #333;
+  font-size: 12px;
+  user-select: none;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.win-bar__qat {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+  font-size: 11px;
+  color: #555;
+  opacity: 0.75;
+}
+
+.win-bar__qat:hover { background: #e6e6e6; }
+
+.win-bar__title {
+  margin-left: 8px;
+  color: #444;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46vw;
+}
+
+.win-bar__spacer { flex: 1; }
+
+.win-bar__acct {
+  padding: 2px 9px;
+  border-radius: var(--r-full);
+  background: #e8f0fe;
+  color: #1a73e8;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.win-bar__btns { display: flex; align-items: stretch; height: 100%; }
+
+.win-btn {
+  width: 44px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-style: normal;
+  color: #444;
+}
+
+.win-btn:hover { background: #e6e6e6; }
+.win-btn--close:hover { background: #e81123; color: #fff; }
+
+/* 暗色应用（VS Code / 终端风格）的标题栏 */
+.win-bar--code {
+  background: #3c3c3c;
+  color: #ccc;
+  border-bottom-color: #2b2b2b;
+}
+
+.win-bar--code .win-bar__title { color: #ccc; }
+.win-bar--code .win-bar__acct { background: #37373d; color: #9cdcfe; }
+.win-bar--code .win-btn { color: #ccc; }
+.win-bar--code .win-btn:hover { background: #4a4a4a; }
+.win-bar--code .win-btn--close:hover { background: #e81123; color: #fff; }
+
+/* ==========================================================================
+   Word：Ribbon 选项卡 + 分组 + 标尺
+   ========================================================================== */
+.ribbon-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  padding: 0 12px;
+  background: #f3f3f3;
+  border-bottom: 1px solid #e5e5e5;
+  font-size: 12px;
+}
+
+.ribbon-tab {
+  padding: 4px 12px 5px;
+  color: #444;
+  border-radius: 4px 4px 0 0;
+  white-space: nowrap;
+}
+
+.ribbon-tab.is-active {
+  color: #1a5fb4;
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 #1a5fb4;
+}
+
+.ribbon-body { height: 62px; align-items: stretch; }
+
+.ribbon-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 5px 10px 2px;
+  border-right: 1px solid #e8e8e8;
+}
+
+.ribbon-group:last-child { border-right: none; }
+.ribbon-group__row { display: flex; align-items: center; gap: 3px; flex: 1; }
+
+.ribbon-group__label {
+  text-align: center;
+  font-size: 10px;
+  color: #888;
+  padding-top: 2px;
+}
+
+.fake__tool--sel {
+  border: 1px solid #d0d0d0;
+  background: #fff;
+  min-width: 52px;
+  text-align: center;
+}
+
+/* Word 标尺：纸张上方那条带刻度的尺子 */
+.fake__ruler {
+  flex: 0 0 auto;
+  height: 18px;
+  margin: 0 auto;
+  width: 700px;
+  max-width: 96%;
+  background:
+    repeating-linear-gradient(90deg, #d8d8d8 0 1px, transparent 1px 12px),
+    repeating-linear-gradient(90deg, #b8b8b8 0 1px, transparent 1px 60px),
+    #efefef;
+  border-bottom: 1px solid #ddd;
+}
+
+/* Word 纸张里的正文容器：整章的连续文本 */
+.fake-page__body {
+  font-family: "Times New Roman", "SimSun", serif;
+  font-size: 14.5px;
+  line-height: 1.85;
+  color: #1a1a1a;
+}
+
+.fake-page__body p { margin: 0 0 12px; text-indent: 2em; }
+
+/* 纸张可滚动（伪装界面里滚轮就是读小说） */
+
+/* ==========================================================================
+   Excel：说明列（小说藏在这里）+ Sheet 标签栏
+   ========================================================================== */
+.fake--excel .fake__main { flex-direction: row; }
+
+.sheet-note {
+  width: 320px;
+  flex: 0 0 auto;
+  border-left: 1px solid #d4d4d4;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #fff;
+}
+
+.sheet-note__cols {
+  flex: 0 0 auto;
+  display: flex;
+  height: 20px;
+  background: #f3f3f3;
+  border-bottom: 1px solid #d4d4d4;
+  font-size: 11px;
+  color: #666;
+}
+
+.sheet-note__cols span {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  border-right: 1px solid #e0e0e0;
+}
+
+.sheet-note__scroll { flex: 1; min-height: 0; overflow: auto; }
+
+.sheet-note__inner {
+  padding: 10px 12px;
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+  font-size: 12.5px;
+  line-height: 1.85;
+  color: #222;
+}
+
+.sheet-note__inner p { margin: 0 0 9px; text-indent: 2em; }
+
+.sheet-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  height: 24px;
+  padding: 0 8px;
+  background: #f3f3f3;
+  border-top: 1px solid #d4d4d4;
+  font-size: 11.5px;
+}
+
+.sheet-tab {
+  padding: 3px 14px;
+  color: #555;
+  background: #e8e8e8;
+  border-radius: 0 0 3px 3px;
+}
+
+.sheet-tab.is-active {
+  background: #fff;
+  color: #1a5fb4;
+  font-weight: 600;
+  border-bottom: 2px solid #1a5fb4;
+}
+
+.sheet-tab__add { margin-left: 6px; color: #666; padding: 0 8px; }
+
+/* 状态栏缩放条 */
+.statusbar__zoom { padding: 0 6px; color: #666; }
+.statusbar__zoomline {
+  width: 80px;
+  height: 3px;
+  background: #d0d0d0;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.statusbar__zoomline i { display: block; height: 100%; background: #1a5fb4; border-radius: 2px; }
+
+/* ==========================================================================
+   VS Code：面包屑 + 编辑器 + minimap + 底部面板
+   ========================================================================== */
+.code-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+.breadcrumb {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 12px;
+  background: #1e1e1e;
+  color: #969696;
+  font-size: 11.5px;
+  border-bottom: 1px solid #2b2b2b;
+}
+
+.breadcrumb__sep { opacity: 0.6; }
+.breadcrumb__sym { color: #cccccc; }
+
+/* 编辑器里是整章的连续正文（markdown 风格） */
+.code-area__inner {
+  padding: 10px 0 30px;   /* 留白在内层，滚动时不露残行 */
+  font-family: var(--font-mono), "Consolas", monospace;
+  font-size: 12.5px;
+  line-height: 1.72;
+  color: #d4d4d4;
+}
+
+.code-area__inner p {
+  margin: 0 0 10px;
+  padding: 0 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.code-area__inner p::before {
+  content: "// ";
+  color: #6a9955;
+}
+
+/* minimap：右侧缩略图，VS Code 最有辨识度的特征之一 */
+.minimap {
+  width: 76px;
+  flex: 0 0 auto;
+  background: #1e1e1e;
+  border-left: 1px solid #2b2b2b;
+  padding: 6px 8px;
+  overflow: hidden;
+  opacity: 0.75;
+}
+
+.minimap i {
+  display: block;
+  height: 1.5px;
+  margin-bottom: 2px;
+  background: #4b4b4b;
+  border-radius: 1px;
+}
+
+/* 底部面板（问题/终端） */
+.panel {
+  flex: 0 0 auto;
+  height: 96px;
+  background: #1e1e1e;
+  border-top: 1px solid #2b2b2b;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel__tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 11.5px;
+  color: #969696;
+  border-bottom: 1px solid #2b2b2b;
+}
+
+.panel__tab.is-active { color: #e7e7e7; box-shadow: inset 0 -1px 0 #007acc; }
+
+.panel__body { flex: 1; min-height: 0; overflow: hidden; padding: 6px 12px; font-size: 11.5px; color: #cccccc; }
+
+.panel__line { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+
+.panel__ico { color: #4aa8ff; }
+.panel__ico--warn { color: #cca700; }
+.panel__line code {
+  font-family: var(--font-mono), monospace;
+  color: #ce9178;
+  background: transparent;
+}
+
+/* ==========================================================================
+   Outlook：文件夹树计数 + 邮件阅读窗格
+   ========================================================================== */
+.mail-side__count {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: #0078d4;
+  font-weight: 600;
+}
+
+.mail-side__dot--dim { background: #a19f9d; }
+
+.mail-side__group {
+  padding: 10px 16px 4px;
+  font-size: 11px;
+  color: #8a8886;
+  text-transform: none;
+}
+
+.mail-side__item { display: flex; align-items: center; gap: 8px; }
+
+/* 阅读窗格里的邮件正文就是小说 */
+.mail-view__head { padding: 22px 28px 0; }
+.mail-view__inner { padding: 0 28px 28px; }
+.mail-view__inner p { margin: 0 0 12px; }
+.mail-view__inner p:first-child { text-indent: 0; }
+
+/* ==========================================================================
+   伪装界面的「抬头」样式
+   ==========================================================================
+   四个伪装界面都是"固定抬头 + 可变正文"两段式：
+   抬头是永远不变的工作文档外壳（会议信息 / 备注表头 / 文件注释 / 邮件头），
+   正文才是真正要读的小说。两者拼在一起才像一份完整文件。 */
+/* ⚠ 抬头必须紧凑：会议信息 4 行 + 标题，整块高度要明显小于一屏，
+   否则小说正文被挤到屏幕外，用户切进来只看得到假会议内容。 */
+.fake-page__head p { margin: 0 0 6px; text-indent: 0; font-size: 13.5px; }
+.fake-page__head .doc-no { text-indent: 0; font-weight: 600; margin-top: 10px; }
+.fake-page__head h1 {
+  font-size: 16px;
+  text-align: center;
+  font-weight: 600;
+  margin: 0 0 14px;
+  font-family: "Microsoft YaHei", sans-serif;
+}
+
+/* 抬头与正文之间一条极轻的分隔，读起来像"文档的下一节" */
+.fake-page__body { margin-top: 6px; }
+.fake-page__body p:first-child { margin-top: 0; }
+
+/* Excel 说明列表头 */
+.sheet-note__head {
+  padding: 7px 12px 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #444;
+  background: #f7f7f7;
+  border-bottom: 1px solid #e4e4e4;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* VS Code 文件头注释 */
+/* ⚠ 不要用 white-space:pre-wrap 渲染这个多行注释头：
+   它会让每行按最长行撑开，实测把抬头顶到 615px（比视口还高），
+   一进 VS Code 伪装满屏都是文件头，正文全被挤下去。
+   改成 display:none 的兜底 + 单行显示，抬头高度稳定在 1 行。 */
+.code-area__head {
+  padding: 8px 18px 6px;
+  font-family: var(--font-mono), "Consolas", monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #6a9955;
+  font-style: italic;
+  white-space: normal;   /* 关键：不要 pre-wrap */
+}
+
+/* 邮件头（发件人条 + 操作按钮） */
+.mail-view__subject {
+  font-size: 18px;
+  font-weight: 600;
+  color: #201f1e;
+  margin: 0 0 14px;
+  line-height: 1.45;
+}
+
+.mail-view__from {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #edebe9;
+  margin-bottom: 14px;
+}
+
+.mail-view__avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #0078d4;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mail-view__meta { display: flex; flex-direction: column; line-height: 1.4; }
+.mail-view__meta b { font-size: 13px; color: #201f1e; }
+.mail-view__meta span { font-size: 11.5px; color: #605e5c; }
+.mail-view__time { margin-left: auto; font-size: 11.5px; color: #605e5c; }
+
+.mail-view__actions {
+  display: flex;
+  gap: 14px;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid #edebe9;
+  font-size: 12px;
+  color: #0078d4;
+}
+
+/* minimap 当前视口指示（一小段更亮的行） */
+.minimap i.is-view { background: #7a7a7a; }
+
+/* 邮件列表行：发件人与时间同行，未读加粗 */
+.mail-row__top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.mail-row__from { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-row__time { flex: 0 0 auto; font-size: 11px; color: #8a8886; font-weight: 400; }
+.mail-row.is-unread .mail-row__from,
+.mail-row.is-unread .mail-row__subj { font-weight: 700; }
+.mail-row.is-unread::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: #0078d4;
+}
+.mail-row { position: relative; }
+
+/* ⚠ minimap 必须限高：内部每行 3.5px × 140 行会把容器撑到 490px，
+   在 593px 高的编辑区里几乎占满，还会把真实内容挤走。 */
+.minimap {
+  max-height: 100%;
+  overflow: hidden;
+}
+
+/* ==========================================================================
+   伪装界面右下角的翻页控件
+   ==========================================================================
+   整窗点击与键盘都是"隐藏交互"，第一次用的人不知道伪装界面里能翻页。
+   这对小按钮把能力暴露出来，同时不破坏伪装观感：
+   半透明、默认低对比，悬停才完全显现。 */
+.fake-nav {
+  position: absolute;
+  right: 14px;
+  bottom: 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: rgba(128, 128, 128, 0.14);
+  opacity: 0.45;
+  transition: opacity var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+  z-index: 5;
+  user-select: none;
+}
+
+.fake-nav:hover { opacity: 1; background: rgba(128, 128, 128, 0.26); }
+
+.fake-nav__btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #555;
+  font-size: 16px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.fake-nav__btn:hover { background: rgba(0, 0, 0, 0.08); color: #111; }
+
+.fake-nav__label {
+  font-size: 11px;
+  color: #666;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* VS Code 是暗色界面，控件配色要跟着暗 */
+.fake--code .fake-nav { background: rgba(60, 60, 60, 0.55); }
+.fake--code .fake-nav:hover { background: rgba(70, 70, 70, 0.8); }
+.fake--code .fake-nav__btn { color: #bbb; }
+.fake--code .fake-nav__btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.fake--code .fake-nav__label { color: #999; }

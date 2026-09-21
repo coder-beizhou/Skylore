@@ -1,11 +1,15 @@
 # 依赖
 node_modules/
+# 内嵌浏览器测试台（本地 mock + 静态服务，非项目源码）
+.harness/
 
 # 工具内部工作记录（开发过程日志，非项目源码）
 .workbuddy/
 
 # 构建产物（可由 npm run build 重新生成）
 dist/
+# 历史遗留的临时构建目录（由系统进程锁定，删不掉，但不影响使用）
+dist-build-*/
 .srcpack/
 .verify/
 

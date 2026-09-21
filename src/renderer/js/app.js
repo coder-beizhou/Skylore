@@ -6,6 +6,7 @@ import { BookshelfView } from './views/bookshelf.js';
 import { ReaderView } from './views/reader.js';
 import { SettingsView } from './views/settings.js';
 import { BossView } from './views/boss.js';
+import { Keymap, matches } from './lib/keymap.js';
 
 const api = window.firmament;
 
@@ -55,6 +56,8 @@ export const App = {
 
   async init() {
     this.theme = new ThemeManager(State.settings);
+    /** 快捷键表（settings.keybindings 里的用户自定义优先） */
+    this.keymap = new Keymap(State.settings);
     this.theme.bind($('#readerBgTex') ? { querySelector: () => $('#readerBgTex') } : null);
 
     this.applyStaticIcons();
@@ -163,74 +166,60 @@ export const App = {
     });
   },
 
-  /** 全局快捷键 */
+  /**
+   * 全局快捷键。
+   *
+   * ⚠ 所有可自定义的键都通过 Keymap 查表（见 lib/keymap.js）：
+   *   这里不再写死 'Ctrl+F' 这类字面量，改成 matches(e, keymap.resolve(action))。
+   *   用户改键后立即生效，无需重启 —— 因为每次按键都会重新查表。
+   *
+   * 不开放自定义的键：
+   *   · Esc —— 退出摸鱼/逐层返回，改坏了会"进得去出不来"
+   *   · F11  —— 由下面单独处理，但也在快捷键表里可自定义（见 app.fullscreen）
+   */
   bindGlobalKeys() {
     on(document, 'keydown', (e) => {
       const tag = (e.target.tagName || '').toLowerCase();
       const inInput = tag === 'input' || tag === 'textarea' || e.target.isContentEditable;
+      const km = this.keymap;
 
-      // F11 全屏：任何状态下都可触发
-      if (e.key === 'F11') {
-        e.preventDefault();
-        e.stopPropagation();
-        this.toggleFullscreen();
-        return;
-      }
-
-      // Esc 逐层退出
+      // Esc 逐层退出（刻意不可自定义：这是"退出摸鱼"的兜底通道）
       if (e.key === 'Escape') {
         if (this.boss && this.boss.isActive) { this.boss.exit(); return; }
         if (this.reader && this.reader.handleEscape()) { e.preventDefault(); return; }
         if (State.view === 'settings') { this.route('library'); return; }
       }
 
-      if (State.view === 'reader') {
-        // 输入框内不劫持常规按键
-        if (inInput && e.key !== 'Escape') return;
-
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
-          e.preventDefault();
-          this.reader.openSearch();
-          return;
-        }
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
-          e.preventDefault();
-          this.reader.toggleBookmark();
-          return;
-        }
-        if ((e.ctrlKey || e.metaKey) && e.key === ',') {
-          e.preventDefault();
-          this.reader.toggleSettings();
-          return;
-        }
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't') {
-          e.preventDefault();
-          this.reader.toggleToc();
-          return;
-        }
-        if ((e.ctrlKey || e.metaKey) && e.key === '=') {
-          e.preventDefault();
-          Bus.emit('reader:step-font', 1);
-          return;
-        }
-        if ((e.ctrlKey || e.metaKey) && e.key === '-') {
-          e.preventDefault();
-          Bus.emit('reader:step-font', -1);
-          return;
-        }
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
-          e.preventDefault();
-          Bus.emit('reader:toggle-dark');
-          return;
-        }
+      // 全屏：任何视图下都可触发
+      if (km && matches(e, km.resolve('app.fullscreen'))) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.toggleFullscreen();
+        return;
       }
 
-      // 书架：Ctrl+O 导入
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
+      // 导入：全局生效
+      if (km && matches(e, km.resolve('book.import'))) {
         e.preventDefault();
         if (State.view === 'reader') this.reader.close();
         this.bookshelf.importDialog();
+        return;
       }
+
+      // 以下为阅读页专属
+      if (State.view !== 'reader') return;
+      if (inInput) return;
+
+      const R = (name) => km && matches(e, km.resolve(name));
+
+      if (R('reader.search')) { e.preventDefault(); this.reader.openSearch(); return; }
+      if (R('reader.bookmark')) { e.preventDefault(); this.reader.toggleBookmark(); return; }
+      if (R('reader.settings')) { e.preventDefault(); this.reader.toggleSettings(); return; }
+      if (R('reader.toc')) { e.preventDefault(); this.reader.toggleToc(); return; }
+      if (R('reader.fontUp')) { e.preventDefault(); Bus.emit('reader:step-font', 1); return; }
+      if (R('reader.fontDown')) { e.preventDefault(); Bus.emit('reader:step-font', -1); return; }
+      if (R('reader.dark')) { e.preventDefault(); Bus.emit('reader:toggle-dark'); return; }
+      if (R('reader.boss')) { e.preventDefault(); this.reader.openBossMenu(); return; }
     });
   },
 
@@ -366,8 +355,13 @@ export const App = {
     State.settings = { ...State.settings, ...patch };
     this.theme.settings = State.settings;
     this.theme.apply();
+    // 快捷键表跟随设置：改键后立刻生效
+    if (this.keymap) this.keymap.settings = State.settings;
     const res = await call(api.settings.patch(patch), { silent: silent !== false });
-    if (res) State.settings = res;
+    if (res) {
+      State.settings = res;
+      if (this.keymap) this.keymap.settings = State.settings;
+    }
     return State.settings;
   },
 };

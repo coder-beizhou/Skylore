@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('firmament', {
     info: () => invoke('app:info'),
     bounds: () => invoke('win:bounds'),
     minimize: () => invoke('win:minimize'),
+    /** 从透明迷你框形态退出后重新显示主窗口 */
+    show: () => invoke('app:show'),
     maximize: () => invoke('win:maximize'),
     close: () => invoke('win:close'),
     isMaximized: () => invoke('win:is-maximized'),
@@ -89,6 +91,22 @@ contextBridge.exposeInMainWorld('firmament', {
     apply: (opts) => invoke('boss:apply', opts),
     preview: (mode) => invoke('boss:preview', mode),
     onToggle: (cb) => on('boss:toggled', cb),
+    /** 双角拖拽调整迷你框尺寸（anchor: 'br' 右下角 / 'bl' 左下角） */
+    setBoxSize: (w, h, which, anchor) => invoke('boss:set-box-size', w, h, which, anchor),
+    getBoxSize: (which) => invoke('boss:get-box-size', which),
+    /** 透明浮窗诊断（冒烟测试 / 排查用） */
+    overlayDiagnostics: () => invoke('boss:overlay-diagnostics'),
+  },
+
+  /** 透明迷你框浮窗专用（仅在 boss-overlay.html 里可用） */
+  overlay: {
+    snapshot: () => invoke('overlay:snapshot'),
+    reportPosition: (pos) => invoke('overlay:position', pos),
+    exit: () => invoke('overlay:exit'),
+    onContent: (cb) => on('overlay:content', cb),
+    onGeometry: (cb) => on('overlay:geometry', cb),
+    /** 主题/墨色变化后请求重推快照 */
+    refresh: () => invoke('overlay:refresh'),
   },
 
   dialog: {

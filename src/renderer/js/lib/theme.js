@@ -169,10 +169,30 @@ export class ThemeManager {
     r.setProperty('--reader-para-indent', (s.paragraphIndent != null ? s.paragraphIndent : 2) + 'em');
     r.setProperty('--reader-text-align', s.textAlign || 'justify');
 
-    r.setProperty('--reader-mt', (s.marginTop != null ? s.marginTop : 64) + 'px');
-    r.setProperty('--reader-mb', (s.marginBottom != null ? s.marginBottom : 64) + 'px');
-    r.setProperty('--reader-ml', (s.marginLeft != null ? s.marginLeft : 88) + 'px');
-    r.setProperty('--reader-mr', (s.marginRight != null ? s.marginRight : 88) + 'px');
+    // 页边距。
+    //
+    // ⚠ 写两份：
+    //     · --reader-m* 是**最终生效值**，正文排版读它
+    //     · --reader-m*-raw 是用户设定的**原始值**，供窄窗媒体查询做收敛
+    //
+    //   为什么必须分成两个名字：CSS 里想写「不超过窗口宽度 6%」就得用
+    //     --reader-ml: min(var(--reader-ml), 6vw)
+    //   而这是自定义属性的**自引用**，会让变量变成
+    //   invalid at computed-value time（实测直接算成 0px，正文贴边）；
+    //   即便改名成 --ml-user: var(--reader-ml) 再引用回去，仍构成循环引用，
+    //   结果同样是 0px。只有「JS 写原始值、CSS 读它做收敛」才不循环。
+    const mt = (s.marginTop != null ? s.marginTop : 64);
+    const mb = (s.marginBottom != null ? s.marginBottom : 64);
+    const ml = (s.marginLeft != null ? s.marginLeft : 88);
+    const mr = (s.marginRight != null ? s.marginRight : 88);
+    r.setProperty('--reader-mt', mt + 'px');
+    r.setProperty('--reader-mb', mb + 'px');
+    r.setProperty('--reader-ml', ml + 'px');
+    r.setProperty('--reader-mr', mr + 'px');
+    r.setProperty('--reader-mt-raw', mt + 'px');
+    r.setProperty('--reader-mb-raw', mb + 'px');
+    r.setProperty('--reader-ml-raw', ml + 'px');
+    r.setProperty('--reader-mr-raw', mr + 'px');
 
     // 正文最大宽度：0 表示不限宽。
     // ⚠ 不限宽时必须写 none，不能写 0px —— 写 0px 会让 max-width 生效为 0，
