@@ -735,6 +735,57 @@ const SMOKE_CHECKS = `
            afterDbl && afterDbl.data ? ('active=' + afterDbl.data.active) : 'no state');
       }
 
+      // ⚠ 回归：迷你框与主阅读器的位置必须互不漂移。
+      //   旧实现把「章内比例」喂给 scroller.setRatio（整条连续流的全局比例），
+      //   读到后面章节时主界面会被甩回全书前段；迷你框比例又被 clamp 在 0~1，
+      //   向上滚到章顶就停死，翻不回上一章。两条都在这验证。
+      {
+        await App.reader.gotoChapter(2, 0.5);
+        await sleep(600);
+        await App.boss.enter({ mode: 'mini-text', style: 'square' });
+        await sleep(700);
+
+        // (a) 迷你框向上越过章顶 → 回到上一章章末
+        const chBefore = App.reader.chapterIndex;
+        App.boss.applyMiniRatio(-0.05);
+        await sleep(900);
+        ok('迷你框可向上翻阅之前的章节',
+           App.reader.chapterIndex === chBefore - 1,
+           '第 ' + (chBefore + 1) + ' 章 → 第 ' + (App.reader.chapterIndex + 1) + ' 章');
+
+        // (b) 退出后主界面位置 = 迷你框最后位置（不漂移）
+        const miniIdx = App.reader.chapterIndex;
+        const miniRatio = App.reader.ratio;
+        await App.boss.exit();
+        await sleep(900);
+        const mainIdx = App.reader.chapterIndex;
+        const mainRatio = App.reader.ratio;
+        ok('退出迷你框后主界面位置不漂移',
+           mainIdx === miniIdx && Math.abs(mainRatio - miniRatio) < 0.08,
+           '迷你框 第' + (miniIdx + 1) + '章 ' + Number(miniRatio).toFixed(2)
+             + ' → 主界面 第' + (mainIdx + 1) + '章 ' + Number(mainRatio).toFixed(2));
+
+        // (c) 滚动模式下迷你框回写不得把主界面甩到全书前段
+        await App.reader.setPageMode('scroll');
+        await sleep(900);
+        await App.reader.gotoChapter(4, 0.3);
+        await sleep(900);
+        await App.boss.enter({ mode: 'mini-text', style: 'square' });
+        await sleep(700);
+        App.boss.applyMiniRatio(0.6);
+        await sleep(900);
+        await App.boss.exit();
+        await sleep(700);
+        // 摸鱼期间 #app 隐藏，continuous 几何为 0，读它没有意义；
+        // 退出后引擎按逻辑位置重定位，此时读才代表真实结果。
+        const pos = App.reader.continuous.current();
+        ok('滚动模式下迷你框回写保持当前章（不跳回前段）',
+           pos.index === 4,
+           '期望第 5 章，实际第 ' + (pos.index + 1) + ' 章');
+        await App.reader.setPageMode('page');
+        await sleep(700);
+      }
+
       // 重新进入摸鱼（显式指定 mini-text + square，走与用户一致的路径），
       // 校验窗口不会被误最大化
       await App.boss.enter({ mode: 'mini-text', style: 'square' });
@@ -913,6 +964,12 @@ const SMOKE_CHECKS = `
            label ? label.textContent : 'no label');
 
         // (b) 点「下一章」按钮能换章
+        // ⚠ 先定位到中间章：前面的漂移回归会把阅读器留在末章，
+        //   末章点「下一章」本就不动，断言会误报。
+        await App.reader.gotoChapter(1, 0);
+        await sleep(700);
+        App.boss.renderFakeContent('fake-word');
+        await sleep(400);
         const chBefore = App.reader.chapterIndex;
         const nextBtn = nav ? nav.querySelector('[data-fake-nav="next"]') : null;
         if (nextBtn) {

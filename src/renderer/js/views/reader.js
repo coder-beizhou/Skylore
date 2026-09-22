@@ -30,6 +30,9 @@ export class ReaderView {
     this.chapterIndex = 0;
     this.chapter = null;
     this.ratio = 0;
+    // 引擎（分页/连续流）当前实际装载的章。摸鱼期间 #app 隐藏时引擎
+    // 不跟随逻辑位置，两者会短暂分叉；退出摸鱼靠它判断要不要重定位。
+    this._engineChapterIndex = 0;
     this.paginator = null;
     this.scroller = null;
     this.continuous = null;
@@ -175,6 +178,7 @@ export class ReaderView {
 
     this.chapterIndex = index;
     const data = await this.fetchChapter(index);
+    this._engineChapterIndex = index;
     if (!data) throw new Error('章节内容读取失败');
 
     this.chapter = data;
@@ -242,6 +246,7 @@ export class ReaderView {
     if (pos.index !== this.chapterIndex) {
       this.chapterIndex = pos.index;
       if (data) this.chapter = data;
+      this._engineChapterIndex = pos.index;
       this.renderTitlebar();
       this.markTocActive();
     }
@@ -465,6 +470,70 @@ export class ReaderView {
     this.updateProgressUI();
   }
 
+  /**
+   * 按「第几章 + 章内比例」定位。全应用唯一的位置写回入口。
+   *
+   * ⚠ 为什么必须有它：scroll 模式下 Scroller.setRatio 的语义是
+   *   「整条连续流的全局比例」，而 reader.ratio 是「章内比例」。
+   *   此前迷你框/伪装界面直接把章内比例喂给 scroller.setRatio，
+   *   主界面就被甩到全局流的同一比例处 —— 读到第七章时等于跳回
+   *   全书前段（用户看到的"跳回刚打开的章节"）。
+   *   这里统一走 continuous.gotoChapter（章感知），page 模式走 paginator。
+   */
+  async setChapterRatio(index, ratio) {
+    if (!this.book || !this.toc.length) return;
+    const idx = Math.max(0, Math.min(this.toc.length - 1, Math.round(index)));
+    const r = Math.max(0, Math.min(1, ratio));
+
+    // ⚠ 摸鱼期间 #app 是 display:none，分页/连续流的几何测量全部为 0。
+    //   此时驱动引擎会把 pageCount/scrollTop 算坏，退出后位置就漂了。
+    //   隐藏时只更新「逻辑位置」（章号+章内比例+章节内容），引擎等退出后再定位。
+    const appHidden = !document.getElementById('app').getClientRects().length;
+    if (appHidden) {
+      if (idx !== this.chapterIndex) {
+        const data = await this.fetchChapter(idx);
+        if (data) {
+          this.chapterIndex = idx;
+          this.chapter = data;
+          this.renderTitlebar();
+          this.markTocActive();
+        }
+      }
+      this.ratio = r;
+      this.updateProgressUI();
+      this.scheduleSave();
+      return;
+    }
+
+    if (idx !== this.chapterIndex) {
+      await this.gotoChapter(idx, r);
+      this.ratio = r;
+      this.updateProgressUI();
+      this.scheduleSave();
+      return;
+    }
+
+    this.ratio = r;
+    // 引擎装载的章可能与逻辑章分叉（摸鱼隐藏期间只换了逻辑章）。
+    // 此时 setRatio 会作用在旧章内容上，必须整章重定位。
+    if (this._engineChapterIndex !== idx) {
+      await this.gotoChapter(idx, r);
+      this._engineChapterIndex = idx;
+      this.updateProgressUI();
+      this.scheduleSave();
+      return;
+    }
+    if (this.isScrollMode()) {
+      if (this.continuous && this.continuous.active) await this.continuous.gotoChapter(idx, r);
+      else this.scroller.setRatio(r, false);
+    } else {
+      this.paginator.setRatio(r);
+    }
+    this._engineChapterIndex = idx;
+    this.updateProgressUI();
+    this.scheduleSave();
+  }
+
   /* ============================ 翻页 / 滚动 ============================ */
 
   isScrollMode() {
@@ -552,6 +621,7 @@ export class ReaderView {
       await this.continuous.gotoChapter(i, ratio || 0);
       const pos = this.continuous.current();
       this.chapterIndex = pos.index;
+      this._engineChapterIndex = pos.index;
       const d = this.continuous.currentData();
       if (d) this.chapter = d;
       this.renderTitlebar();

@@ -614,11 +614,24 @@ export class BossView {
   }
 
   async exit() {
+    // ⚠ 必须在 applyVisibility(false) **之前**捕获逻辑位置。
+    //   复显 #app 会触发分页引擎重排 → onPageChange 把 reader.ratio
+    //   覆盖回「摸鱼前旧章」的比例（实测 1.00 被改成 0.57），
+    //   之后再读就拿不到摸鱼期间的真实位置了。
+    const r0 = this.app.reader;
+    const logical = r0 && r0.book ? { index: r0.chapterIndex, ratio: r0.ratio } : null;
     await this.applyVisibility(false, this.mode, this.style);
     const st = await call(this.api.boss.toggle(false), { silent: true });
     if (st) this.syncFromMain(st);
     // 透明浮窗形态下主窗口被隐藏，退出后必须确保它回到可见状态
     await call(this.api.app.show(), { silent: true });
+    // ⚠ 摸鱼期间 #app 隐藏，引擎几何不可测，位置只存在逻辑值里。
+    //   恢复可见后必须按「章号+章内比例」重新定位一次，否则主界面
+    //   会停在摸鱼前被引擎算坏的旧位置（用户看到的"漂移"）。
+    const reader = this.app.reader;
+    if (reader && reader.book && logical) {
+      await reader.setChapterRatio(logical.index, logical.ratio);
+    }
     this.app.reader && this.app.reader.showUI(true);
     toast('已恢复阅读', { duration: 1400 });
   }
@@ -825,8 +838,9 @@ export class BossView {
         reader.ratio = ratio;
 
         // 与阅读引擎同步：分页模式同步页码，滚动模式同步像素位置
-        if (this.state.settings.pageMode === 'scroll') reader.scroller.setRatio(ratio, false);
-        else reader.paginator.setRatio(ratio);
+        // ⚠ 必须走章感知入口：scroller.setRatio 是「整条连续流的全局比例」，
+        //   把章内比例喂给它会把主界面甩到全书前段（"读几章后跳回开头"）。
+        reader.setChapterRatio(reader.chapterIndex, ratio);
 
         reader.updateProgressUI();
         reader.scheduleSave();
@@ -1170,19 +1184,26 @@ export class BossView {
    * 把新的章内比例写回阅读引擎并刷新迷你框。
    * 抽出来是因为"整屏翻页"和"滚轮按行滚动"走的是同一条写回路径。
    */
-  applyMiniRatio(next) {
+  async applyMiniRatio(next) {
     const reader = this.app.reader;
     if (!reader || !reader.chapter) return;
-    const r = clamp(next, 0, 1);
-    reader.ratio = r;
-
-    // 同步真实阅读位置，退出后能接上
-    if (this.state.settings.pageMode === 'scroll') reader.scroller.setRatio(r, false);
-    else reader.paginator.setRatio(r);
-
+    // ⚠ 不 clamp 到 0~1：越界代表"翻出当前章"。
+    //   旧实现 clamp 后向上滚到章顶就停死，迷你框里永远翻不回上一章
+    //   （用户反馈"开启迷你框后没法向上翻阅之前的章节"）。
+    if (next < 0) {
+      if (reader.chapterIndex <= 0) { this.renderMini(); return; }
+      await reader.setChapterRatio(reader.chapterIndex - 1, 1);
+      this.renderMini();
+      return;
+    }
+    if (next > 1) {
+      if (reader.chapterIndex >= (reader.toc ? reader.toc.length - 1 : 0)) { this.renderMini(); return; }
+      await reader.setChapterRatio(reader.chapterIndex + 1, 0);
+      this.renderMini();
+      return;
+    }
+    await reader.setChapterRatio(reader.chapterIndex, next);
     this.renderMini();
-    reader.updateProgressUI();
-    reader.scheduleSave();
   }
 
   /** 迷你框整屏翻页：按容量步进，而不是整章翻 */
